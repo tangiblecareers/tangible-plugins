@@ -1,0 +1,31 @@
+{
+  "name": "tangible-linear",
+  "version": "1.0.0",
+  "description": "Tangible Careers' Linear conventions for AI agents — issues, projects, sprint date-labels, status hygiene, and dependencies.",
+  "author": {
+    "name": "Tangible Engineering",
+    "email": "kaushal.mishra@tangible.careers",
+    "url": "https://github.com/KaushalKishorMishra"
+  },
+  "homepage": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+  "repository": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+  "license": "MIT",
+  "keywords": ["linear", "tangible", "sprint", "project-management", "scrum"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tangible Linear",
+    "shortDescription": "Apply Tangible's Linear conventions when creating/updating work",
+    "longDescription": "Encodes Tangible Careers' Linear workflow — issues, projects, sprint date-labels (not Cycles), the label taxonomy, strict status hygiene, and blocked-by/related dependencies — so any AI agent creates and tracks work the team's way.",
+    "developerName": "Tangible Engineering",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "File a Linear issue for this.",
+      "Gather my current work for sprint planning.",
+      "Commit these issues to the current sprint."
+    ],
+    "websiteURL": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+    "brandColor": "#5E6AD2",
+    "screenshots": []
+  }
+}

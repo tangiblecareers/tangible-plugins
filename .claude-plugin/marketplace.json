@@ -1,0 +1,14 @@
+{
+  "name": "tangible",
+  "description": "Tangible Careers internal AI-agent plugins (company use only)",
+  "owner": { "name": "Tangible Careers", "email": "kaushal.mishra@tangible.careers" },
+  "plugins": [
+    {
+      "name": "tangible-linear",
+      "source": "./plugins/tangible-linear",
+      "description": "Tangible Careers Linear conventions for AI agents (Claude Code, Codex, Cursor, opencode, Gemini, Antigravity, Pi).",
+      "version": "1.0.0",
+      "category": "productivity"
+    }
+  ]
+}
