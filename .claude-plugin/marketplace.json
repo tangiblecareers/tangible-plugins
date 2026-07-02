@@ -5,7 +5,12 @@
   "plugins": [
     {
       "name": "tangible-linear",
-      "source": "./plugins/tangible-linear",
+      "source": {
+        "source": "git-subdir",
+        "url": "git@github.com:tangiblecareers/tangible-plugins.git",
+        "path": "plugins/tangible-linear",
+        "ref": "main"
+      },
       "description": "Tangible Careers Linear conventions for AI agents (Claude Code, Codex, Cursor, opencode, Gemini, Antigravity, Pi).",
       "version": "1.0.0",
       "category": "productivity"
