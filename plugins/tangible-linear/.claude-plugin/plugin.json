@@ -6,8 +6,8 @@
     "name": "Tangible Engineering",
     "email": "kaushal.mishra@tangible.careers"
   },
-  "homepage": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
-  "repository": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+  "homepage": "https://github.com/tangiblecareers/tangible-plugins",
+  "repository": "https://github.com/tangiblecareers/tangible-plugins",
   "license": "MIT",
   "keywords": ["linear", "tangible", "sprint", "project-management", "scrum"],
   "skills": "./skills/"

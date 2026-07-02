@@ -7,8 +7,8 @@
     "email": "kaushal.mishra@tangible.careers",
     "url": "https://github.com/KaushalKishorMishra"
   },
-  "homepage": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
-  "repository": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+  "homepage": "https://github.com/tangiblecareers/tangible-plugins",
+  "repository": "https://github.com/tangiblecareers/tangible-plugins",
   "license": "MIT",
   "keywords": ["linear", "tangible", "sprint", "project-management", "scrum"],
   "skills": "./skills/",
@@ -24,7 +24,7 @@
       "Gather my current work for sprint planning.",
       "Commit these issues to the current sprint."
     ],
-    "websiteURL": "https://github.com/KaushalKishorMishra/tangible-linear-plugin",
+    "websiteURL": "https://github.com/tangiblecareers/tangible-plugins",
     "brandColor": "#5E6AD2",
     "screenshots": []
   }

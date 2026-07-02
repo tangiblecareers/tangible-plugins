@@ -16,7 +16,7 @@ the agent use it correctly.
 Clone, then run the installer once. It symlinks the skill into each agent's global skills
 dir (so `git pull` keeps everything current):
 ```bash
-git clone https://github.com/KaushalKishorMishra/tangible-linear-plugin
+git clone https://github.com/tangiblecareers/tangible-plugins
 node tangible-linear-plugin/bin/install.mjs
 ```
 It targets: `~/.agents/skills` (Codex/Copilot), `~/.claude/skills` + `~/.claude/commands`
@@ -24,7 +24,7 @@ It targets: `~/.agents/skills` (Codex/Copilot), `~/.claude/skills` + `~/.claude/
 
 ### Claude Code (plugin marketplace)
 ```
-/plugin marketplace add KaushalKishorMishra/tangible-linear-plugin
+/plugin marketplace add tangiblecareers/tangible-plugins
 /plugin install tangible-linear@tangible
 ```
 Installs at user scope → active in **all** your repos.
@@ -39,7 +39,7 @@ skill where opencode-compatible tooling finds it.
 
 ### Gemini CLI
 ```
-gemini extensions install https://github.com/KaushalKishorMishra/tangible-linear-plugin
+gemini extensions install https://github.com/tangiblecareers/tangible-plugins
 ```
 (uses `gemini-extension.json` → `GEMINI.md`).
 
