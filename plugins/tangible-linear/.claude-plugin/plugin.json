@@ -1,7 +1,7 @@
 {
   "name": "tangible-linear",
   "description": "Tangible Careers' Linear conventions for AI agents — issues, projects, sprint date-labels, the label taxonomy, status hygiene, and dependencies",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Tangible Engineering",
     "email": "kaushal.mishra@tangible.careers"
