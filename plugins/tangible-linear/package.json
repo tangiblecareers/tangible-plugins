@@ -1,6 +1,6 @@
 {
   "name": "@tangible/linear-plugin",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tangible Careers' Linear conventions for AI agents — Claude Code, Codex, Cursor, opencode, Gemini.",
   "type": "module",
   "main": ".opencode/plugins/tangible-linear.js",
