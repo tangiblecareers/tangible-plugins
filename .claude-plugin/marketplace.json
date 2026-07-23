@@ -14,6 +14,42 @@
       "description": "Tangible Careers Linear conventions for AI agents (Claude Code, Codex, Cursor, opencode, Gemini, Antigravity, Pi).",
       "version": "1.1.0",
       "category": "productivity"
+    },
+    {
+      "name": "tangible-git",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/tangiblecareers/tangible-plugins",
+        "path": "plugins/tangible-git",
+        "ref": "main"
+      },
+      "description": "Tangible Careers' git & pull-request conventions for AI agents (scaffold).",
+      "version": "0.1.0",
+      "category": "productivity"
+    },
+    {
+      "name": "tangible-api",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/tangiblecareers/tangible-plugins",
+        "path": "plugins/tangible-api",
+        "ref": "main"
+      },
+      "description": "Tangible Careers' agent-legible API conventions — OpenAPI, typed clients, endpoint design (scaffold).",
+      "version": "0.1.0",
+      "category": "development"
+    },
+    {
+      "name": "tangible-review",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/tangiblecareers/tangible-plugins",
+        "path": "plugins/tangible-review",
+        "ref": "main"
+      },
+      "description": "Tangible Careers' code-review standards — a shared correctness/security/performance/tests rubric (scaffold).",
+      "version": "0.1.0",
+      "category": "development"
     }
   ]
 }
