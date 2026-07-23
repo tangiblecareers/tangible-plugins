@@ -12,7 +12,7 @@
         "ref": "main"
       },
       "description": "Tangible Careers Linear conventions for AI agents (Claude Code, Codex, Cursor, opencode, Gemini, Antigravity, Pi).",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "category": "productivity"
     }
   ]
