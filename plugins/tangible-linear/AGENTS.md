@@ -8,7 +8,8 @@ work in Linear (via the Linear MCP). Full rules: `skills/tangible-linear/SKILL.m
 
 - **Sprints are `sprint/YYYY-MM-DD` LABELS** (the sprint's Monday, ISO) — **NOT** Linear Cycles.
 - **Label taxonomy only** (lowercase): `business-req`, `engineering-goal`, `ai-eval`,
-  `backend`, `frontend`, `tech-debt`, `blocked`, `docs`, `sprint/YYYY-MM-DD`. Don't invent labels.
+  `backend`, `frontend`, `security`, `performance`, `bug`, `tech-debt`, `blocked`, `docs`,
+  `sprint/YYYY-MM-DD`. Don't invent labels. See `workspace.json` for the seeded taxonomy.
 - **Status hygiene:** move an issue Todo → In Progress when you pick it up, → Done when
   finished. Never do the work then batch-jump to Done.
 - **Dependencies:** `blocked by` relation **+** the `blocked` label. Incidental cross-effect
@@ -23,5 +24,5 @@ work in Linear (via the Linear MCP). Full rules: `skills/tangible-linear/SKILL.m
 
 ## Workspace
 
-Teams: **Engineering** (`ENG`) · **AI Research** (`AIR`) · **Business/Company** (`BIZ`).
-Questions about process → **Aaryash**.
+Teams: **Engineering** (`ENG`) · **AI Research** (`AIR`) · **Business/Company** (`BIZ`) · **Tangible Founder** (programs/workshops).
+Questions about process → **Aaryash**. Live teams/people/initiatives: `workspace.json`.

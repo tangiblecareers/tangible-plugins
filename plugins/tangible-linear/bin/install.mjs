@@ -2,14 +2,15 @@
 // Universal installer for the tangible-linear plugin.
 // Symlinks the skill (and Claude Code commands) into each agent's skills dir so
 // `git pull` in this repo keeps every agent up to date.
-import { existsSync, mkdirSync, rmSync, symlinkSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url))); // repo root (bin/ sits under it)
 const HOME = homedir();
-const SKILL_SRC = join(ROOT, 'skills', 'tangible-linear');
+const SKILLS_DIR = join(ROOT, 'skills');
+const SKILL_NAMES = readdirSync(SKILLS_DIR).filter((n) => statSync(join(SKILLS_DIR, n)).isDirectory());
 const CMD_SRC = join(ROOT, 'commands');
 
 function link(src, dest) {
@@ -21,16 +22,22 @@ function link(src, dest) {
 const done = [];
 const skipped = [];
 
-function place(label, dest) {
-  try { link(SKILL_SRC, dest); done.push(label + '  →  ' + dest.replace(HOME, '~')); }
+function place(label, src, dest) {
+  try { link(src, dest); done.push(label + '  →  ' + dest.replace(HOME, '~')); }
   catch (e) { skipped.push(label + ' (' + dest.replace(HOME, '~') + ') — ' + e.message); }
 }
 
 // Per-agent global skill locations (each agent discovers skills from its own dir).
-place('Codex · Copilot', join(HOME, '.agents', 'skills', 'tangible-linear'));       // cross-runtime alias
-place('Claude Code',     join(HOME, '.claude', 'skills', 'tangible-linear'));
-place('Antigravity · Gemini', join(HOME, '.gemini', 'config', 'skills', 'tangible-linear'));
-place('Pi',              join(HOME, '.pi', 'agent', 'skills', 'tangible-linear'));
+// Every skill under skills/ is linked into each agent's skills dir.
+const SKILL_DESTS = [
+  ['Codex · Copilot',      join(HOME, '.agents', 'skills')],   // cross-runtime alias
+  ['Claude Code',          join(HOME, '.claude', 'skills')],
+  ['Antigravity · Gemini', join(HOME, '.gemini', 'config', 'skills')],
+  ['Pi',                   join(HOME, '.pi', 'agent', 'skills')],
+];
+for (const [label, base] of SKILL_DESTS)
+  for (const name of SKILL_NAMES)
+    place(label + ' (' + name + ')', join(SKILLS_DIR, name), join(base, name));
 
 // Claude Code slash commands (Claude-Code-only).
 try {

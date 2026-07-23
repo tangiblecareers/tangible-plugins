@@ -1,0 +1,14 @@
+{
+  "name": "tangible-git",
+  "description": "Tangible Careers' git & pull-request conventions for AI agents — branch naming, conventional commits, PR structure, review checklist, and linking work back to Linear",
+  "version": "0.1.0",
+  "author": {
+    "name": "Tangible Engineering",
+    "email": "kaushal.mishra@tangible.careers"
+  },
+  "homepage": "https://github.com/tangiblecareers/tangible-plugins",
+  "repository": "https://github.com/tangiblecareers/tangible-plugins",
+  "license": "MIT",
+  "keywords": ["git", "pull-request", "conventional-commits", "tangible", "code-review"],
+  "skills": "./skills/"
+}

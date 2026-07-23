@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "purpose": "Stable, human-readable facts about the Tangible Careers Linear workspace. The tangible-linear and linear-organize skills read this FIRST, then resolve live IDs and volatile lists via the Linear MCP.",
+    "rules": [
+      "Names only — never store Linear IDs here (they change when objects are recreated; resolve them live with list_teams / list_issue_labels / list_initiatives).",
+      "Treat every list below as the canonical *convention*. For current *state* (which projects/issues exist right now, which sprint labels are created), always query Linear live.",
+      "When this file and the live workspace disagree, prefer live for state and this file for convention — and flag the drift to a human (see needsHumanDecision)."
+    ],
+    "lastSeededFromLinear": "2026-07-23",
+    "seededBy": "audit via Linear MCP (list_teams, list_users, list_issue_labels, list_initiatives, list_projects)"
+  },
+
+  "workspace": "Tangible Careers",
+
+  "teams": [
+    { "name": "Engineering",      "runsSprints": true,  "note": "Builds/maintains the platform. Full 2-week Scrum, rotating scrum master." },
+    { "name": "AI Research",      "runsSprints": false, "note": "Lightweight backlog, no strict sprints. Engineering depends on its deliverables (e.g. Skill Map v1)." },
+    { "name": "Business/Company", "runsSprints": false, "note": "Client / business-owner work and company projects." },
+    { "name": "Tangible Founder", "runsSprints": false, "note": "Founder-led programs & workshops (EU UDAAN, YI Lab, AI for Entrepreneurs). NOT documented in the original guidelines — confirm how it should be treated." }
+  ],
+
+  "people": {
+    "note": "Active human members seeded from list_users. Team assignment beyond Aaryash/Kaushal is unconfirmed — see needsHumanDecision.people.",
+    "members": [
+      { "name": "Aaryash Shakya",       "handle": "aaryash",         "team": "Engineering", "roles": ["scrum-master-first", "lead"] },
+      { "name": "Kaushal Kishor Mishra", "handle": "kaushal",         "team": "Engineering" },
+      { "name": "Prekshya Dawadi",       "handle": "prekshya.dawadi", "team": "unconfirmed" },
+      { "name": "Unisa Sakha",           "handle": "unisa.sakha",     "team": "unconfirmed" },
+      { "name": "Alok Khatri",           "handle": "alok.khatri1",    "team": "unconfirmed", "roles": ["admin", "likely-founder"] }
+    ],
+    "referencedButNotInLinear": ["Prabin — named in the docs and the ai-eval label description as an Engineering member, but has no Linear user account. Confirm/invite."]
+  },
+
+  "sprints": {
+    "mechanism": "sprint/YYYY-MM-DD issue LABELS under the `sprint/` group — NOT Linear Cycles",
+    "anchorMonday": "2026-06-15",
+    "cadenceDays": 14,
+    "labelFormat": "sprint/YYYY-MM-DD",
+    "currentSprintRule": "currentMonday = anchorMonday + 14 * floor((today - anchorMonday) / 14 days)",
+    "computeExample": "python3 -c \"import datetime as d; a=d.date(2026,6,15); t=d.date.today(); print('sprint/'+(a+d.timedelta(days=14*((t-a).days//14))).isoformat())\"",
+    "anchorValidatedBy": "live label sprint/2026-06-29 exists and matches the anchor's 14-day parity",
+    "rollover": "manual — re-tag unfinished issues with the next sprint label"
+  },
+
+  "labels": {
+    "note": "Canonical issue-label taxonomy. Apply as many as genuinely fit. Lowercase, exact names. `frontend` is team-scoped (Engineering); the rest are workspace-level.",
+    "canonical": {
+      "type": {
+        "business-req":     "Client / business-owner work — external, usually deadlined.",
+        "engineering-goal": "Committed dev work — features / planned tasks pulled into a sprint.",
+        "tech-debt":        "Refactors, cleanup, code-health — not a feature or bug.",
+        "docs":             "Documentation — API docs, KB, README/CLAUDE.md.",
+        "bug":              "Defect fix — a broken behavior, not new work (engineering-goal) or cleanup (tech-debt). Canonical lowercase; migrate the live capitalized `Bug`. Pair with backend/frontend."
+      },
+      "area": {
+        "backend":     "Express APIs, services, Postgres, migrations, auth, AWS/pm2.",
+        "frontend":    "React UI, components, state, styling. (team-scoped: Engineering)",
+        "ai-eval":     "AI pipeline, eval prompts, scoring, AI interview, benchmarking, tuning.",
+        "security":    "authn/authz, RBAC, XSS, secrets, CSP, token handling, IDOR. ADDED from live workspace — was missing from the skill.",
+        "performance": "render cost, store subscriptions, caching/query efficiency, bundle size. ADDED from live workspace — was missing from the skill."
+      },
+      "state": {
+        "blocked": "Waiting on a dependency/decision. Pair with the blocked-by relation. Remove when unblocked."
+      },
+      "sprintGroup": "sprint/  (children like sprint/2026-06-29 — see sprints)"
+    },
+    "projectLabels": {
+      "feature": "PROJECT label only (surfaces a project in the pm-dashboard Features column). NEVER apply to an issue. Matched case-insensitively by the board. Can only be created in Linear's UI."
+    },
+    "liveExtrasToReconcile": {
+      "note": "Present in the live workspace but not in the canonical taxonomy. Decide keep / rename-to-canonical / archive — see needsHumanDecision.labels.",
+      "Bug":         "capitalized; should likely become lowercase `bug`",
+      "Feature":     "exists as an issue label; taxonomy says `feature` is a PROJECT label only",
+      "Improvement": "no description; overlaps engineering-goal / tech-debt",
+      "designWorkflowLabels": ["Backend PR Review", "QA Review", "Regulator Variant", "Activity Design", "Rubric Design", "Content Development"]
+    }
+  },
+
+  "initiatives": {
+    "note": "Seeded LIVE from list_initiatives on 2026-07-23. This REPLACES the fictional table that was hard-coded in the linear-organize skill (Platform Foundations / Educator Experience Rebuild / Agentic Development Layer / AI Research & Skill Intelligence / Programs & Partnerships / Core Platform — NONE of which exist). Always re-fetch live before acting.",
+    "rule": "An initiative must be a big, finishable goal spanning several projects — never a permanent bucket.",
+    "live": [
+      { "name": "Agents-First Platform",          "theme": "Machine-legible API contract + tooling so agents can drive platform flows." },
+      { "name": "LMS Enhancement",                 "theme": "Richer course content + cleaner learner/educator/evaluator experiences." },
+      { "name": "Code Health & Tech-Debt Control", "theme": "Tests, validations, transactions, error handling, legacy cleanup." },
+      { "name": "Usability & Quality of Life",     "theme": "UX polish and friction-reducing improvements, feedback-driven." },
+      { "name": "Public Courses & Certification",  "theme": "Public course sharing + certificate enhancements (business requirement)." },
+      { "name": "Course Builder POC",              "theme": "Throwaway POC: prompt-driven course creation on a Neo4j skill graph." },
+      { "name": "Workshop",                        "theme": "Founder workshops. Sparse — confirm whether finishable or should be split/closed." }
+    ]
+  },
+
+  "standaloneProjects": {
+    "note": "Intentionally live at workspace level with NO initiative.",
+    "projects": ["Business Requests", "Tangible Descriptions"]
+  },
+
+  "needsHumanDecision": {
+    "labels": [
+      "DECIDED 2026-07-23: `security`, `performance`, and lowercase `bug` are now canonical (documented only — no Linear changes made).",
+      "OPEN: migrate the live capitalized `Bug` label to lowercase `bug`.",
+      "OPEN: `Feature`/`Improvement` and the design-workflow labels (QA Review, Rubric Design, Activity Design, Content Development, Regulator Variant, Backend PR Review) — keep, rename, or archive."
+    ],
+    "people": [
+      "Confirm Engineering roster: docs say Aaryash/Kaushal/Prabin. Prabin has no Linear account. Are Prekshya Dawadi / Unisa Sakha engineers or another team?"
+    ],
+    "teams": [
+      "How should the `Tangible Founder` team be represented in the conventions? (programs/workshops live there)"
+    ],
+    "initiatives": [
+      "Map the 43 projects to the 7 live initiatives — most are currently unlinked. This is the /linear-organize migration and is a human-in-the-loop step."
+    ]
+  }
+}
