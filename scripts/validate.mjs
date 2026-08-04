@@ -6,6 +6,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectVersions, planUpdates } from './sync-marketplace.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const errors = [];
@@ -107,6 +108,13 @@ for (const name of pluginDirs) {
   // workspace.json (optional) must at least parse if present
   const wsJson = join(dir, 'workspace.json');
   if (existsSync(wsJson)) readJSON(wsJson);
+}
+
+// 3. Marketplace versions must be derived, not hand-written
+if (marketplace) {
+  for (const s of planUpdates(marketplace, collectVersions(ROOT))) {
+    err(`marketplace.json: "${s.name}" is ${s.from} but plugin.json says ${s.to} — run node scripts/sync-marketplace.mjs`);
+  }
 }
 
 // Report
