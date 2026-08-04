@@ -1,0 +1,14 @@
+{
+  "name": "tangible-api",
+  "description": "Tangible Careers' conventions for building machine-legible, agent-operable APIs — OpenAPI contracts, typed clients, and endpoint design for the Agents-First Platform initiative",
+  "version": "0.1.0",
+  "author": {
+    "name": "Tangible Engineering",
+    "email": "kaushal.mishra@tangible.careers"
+  },
+  "homepage": "https://github.com/tangiblecareers/tangible-plugins",
+  "repository": "https://github.com/tangiblecareers/tangible-plugins",
+  "license": "MIT",
+  "keywords": ["api", "openapi", "typed-client", "agents", "tangible", "backend"],
+  "skills": "./skills/"
+}

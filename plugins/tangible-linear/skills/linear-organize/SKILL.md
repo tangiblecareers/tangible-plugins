@@ -8,6 +8,10 @@ description: Use when auditing the Tangible Careers Linear workspace structure, 
 Audit and structure the **Tangible Careers** Linear workspace into Linear's full
 hierarchy. All operations are **additive** — nothing is deleted, moved, or renamed.
 
+**Start by reading [`workspace.json`](../../workspace.json)** for the seeded teams,
+taxonomy, and initiative list — then **always `list_initiatives` / `list_projects` live**,
+because the workspace changes and the seed goes stale.
+
 ## The hierarchy
 
 ```
@@ -30,16 +34,27 @@ project). Leave them unlinked.
 
 An initiative is a **big, finishable goal** that spans several projects — not a
 permanent category. Apply the same "can I call it done?" test as for projects. Never
-create a forever-bucket initiative. Current workspace initiatives:
+create a forever-bucket initiative. This is the **same rule** as the `tangible-linear`
+guidelines (§13): initiatives are used sparingly and must be able to END.
+
+**Do not hard-code the initiative list** — read [`workspace.json`](../../workspace.json)
+(`initiatives.live`) and **always `list_initiatives` live** before acting. As of the
+2026-07-23 seed the live initiatives were:
 
 | Initiative | Theme |
 |---|---|
-| Platform Foundations | Backend reliability, legacy cleanup, RBAC, tech debt |
-| Educator Experience Rebuild | Educator/learner/evaluator UI, QA, course artifacts |
-| Agentic Development Layer | OpenAPI, typed client, machine-legible endpoints |
-| AI Research & Skill Intelligence | Knowledge graph, Skill Map (AIR team) |
-| Programs & Partnerships | AI Generalist, EU UDAAN, YI Lab, AI for Entrepreneurs |
-| Core Platform | Completed historical projects (PBL, Interview Agent, etc.) |
+| Agents-First Platform | Machine-legible API contract + tooling so agents can drive platform flows |
+| LMS Enhancement | Richer course content + cleaner learner/educator/evaluator experiences |
+| Code Health & Tech-Debt Control | Tests, validations, transactions, error handling, legacy cleanup |
+| Usability & Quality of Life | UX polish and friction-reducing improvements, feedback-driven |
+| Public Courses & Certification | Public course sharing + certificate enhancements (business req) |
+| Course Builder POC | Throwaway POC: prompt-driven course creation on a Neo4j skill graph |
+| Workshop | Founder workshops (confirm whether finishable) |
+
+> ⚠️ Earlier versions of this skill hard-coded invented initiatives (Platform Foundations,
+> Educator Experience Rebuild, Agentic Development Layer, AI Research & Skill Intelligence,
+> Programs & Partnerships, Core Platform) that do **not** exist in the workspace. Never
+> recreate them — reconcile against the live list.
 
 ## Audit workflow
 
@@ -49,7 +64,7 @@ Run these in order. Use the Linear MCP tools.
 
 ```
 list_initiatives        → see what already exists
-list_projects           → all 28 projects, note status + team
+list_projects           → all projects (43 on the 2026-07-23 seed), note status + team
 list_documents          → all docs, note which project they belong to
 list_issues (ENG)       → active + backlog issues
 list_issues (BIZ)       → business issues

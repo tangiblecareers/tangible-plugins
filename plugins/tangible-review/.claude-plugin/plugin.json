@@ -1,0 +1,14 @@
+{
+  "name": "tangible-review",
+  "description": "Tangible Careers' code-review standards for AI agents — a shared rubric covering correctness, security, performance, and test coverage, aligned with the team's Linear labels",
+  "version": "0.1.0",
+  "author": {
+    "name": "Tangible Engineering",
+    "email": "kaushal.mishra@tangible.careers"
+  },
+  "homepage": "https://github.com/tangiblecareers/tangible-plugins",
+  "repository": "https://github.com/tangiblecareers/tangible-plugins",
+  "license": "MIT",
+  "keywords": ["code-review", "quality", "security", "performance", "tangible"],
+  "skills": "./skills/"
+}

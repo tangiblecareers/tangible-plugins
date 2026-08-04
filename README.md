@@ -9,6 +9,12 @@ Tangible Careers' **private** AI-agent plugin marketplace — company use only.
 - **tangible-pbl** — an MCP server that authors Problem-Based Learning courses in Tangible
   from a single brief, stopping at six human approval gates. Claude Code only — it ships a
   server rather than skills. See [`plugins/tangible-pbl/`](plugins/tangible-pbl/).
+- **tangible-git** *(scaffold)* — git & pull-request conventions (branch naming, conventional
+  commits, PR structure, Linear linking). See [`plugins/tangible-git/`](plugins/tangible-git/).
+- **tangible-api** *(scaffold)* — agent-legible API conventions (OpenAPI, typed clients,
+  endpoint design) for the Agents-First Platform. See [`plugins/tangible-api/`](plugins/tangible-api/).
+- **tangible-review** *(scaffold)* — code-review standards (correctness, security, performance,
+  tests). See [`plugins/tangible-review/`](plugins/tangible-review/).
 
 ## Install a plugin
 

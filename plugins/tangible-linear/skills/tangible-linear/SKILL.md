@@ -7,15 +7,20 @@ description: Use when creating, updating, or organizing any work in Tangible Car
 
 Apply these whenever doing Linear work for **Tangible Careers**. Act with the Linear MCP tools. Full detail in [guidelines.md](guidelines.md) — this is the operational summary.
 
+**Read [`workspace.json`](../../workspace.json) first** — it holds the live teams, people, the label taxonomy (incl. `security`/`performance`), the sprint anchor, and the current initiative list. Treat it as the convention source of truth, and query Linear live (`list_*`) for current state (which projects/issues/sprint-labels exist right now).
+
 ## Non-obvious rules (this is where agents go wrong — get them right)
 
-1. **Sprints are `sprint/YYYY-MM-DD` LABELS, not Linear Cycles.** We do NOT use Cycles. A sprint's label is named for its **first day (Monday)** in ISO format, under the `sprint/` group — e.g. `sprint/2026-06-29`. "Add to the current sprint" = apply the current sprint label. Never assign a Cycle. Unfinished issues roll over by **re-tagging** with the next sprint's label (manual).
+1. **Sprints are `sprint/YYYY-MM-DD` LABELS, not Linear Cycles.** We do NOT use Cycles. A sprint's label is named for its **first day (Monday)** in ISO format, under the `sprint/` group — e.g. `sprint/2026-06-29`. Sprint Mondays are anchored on **`2026-06-15`** (every sprint is a multiple of 14 days after it) — **compute** the current one, never eyeball it (see [guidelines.md](guidelines.md) §10 for the one-line formula). "Add to the current sprint" = apply the current sprint label. Never assign a Cycle. Unfinished issues roll over by **re-tagging** with the next sprint's label (manual).
 2. **Use only these labels** (exact names, lowercase), as many as genuinely fit:
    - `business-req` — client / business-owner work (external, usually deadlined)
    - `engineering-goal` — committed dev work (features / planned tasks)
    - `ai-eval` — AI pipeline, eval prompts, scoring, AI interview, benchmarking, tuning
    - `backend` — Express APIs, services, Postgres, migrations, auth, AWS/pm2
    - `frontend` — React UI, components, state, styling
+   - `security` — authn/authz, RBAC, XSS, secrets, CSP, tokens, IDOR (pair with backend/frontend)
+   - `performance` — render cost, store subscriptions, caching/query efficiency, bundle size
+   - `bug` — defect fix (broken behavior; not new work or cleanup); lowercase — migrate legacy `Bug`
    - `tech-debt` — refactors, cleanup, code-health (not a feature/bug)
    - `blocked` — waiting on a dependency/decision (remove when unblocked)
    - `docs` — documentation
@@ -44,7 +49,7 @@ Apply the "can I call it done?" test first. Then: team → new project with a na
 To make a project appear in the pm-dashboard **Features** column, tag the **project** (not an issue) with the `feature` project label. The board matches it **case-insensitively** (`feature`/`Feature` both work). Project labels can only be created in Linear's UI, not via the API — if `feature` doesn't exist yet, ask someone to create it, then apply it with `save_project`.
 
 ### Commit work to a sprint
-Work out the current sprint's Monday (ISO). Ensure a `sprint/YYYY-MM-DD` label exists (create it under the `sprint/` group if missing), then apply it to the committed issues. To roll over, re-tag unfinished issues with the new sprint label.
+Compute the current sprint's Monday (anchor `2026-06-15` + 14-day multiples; see guidelines.md §10 for the formula — don't guess). Ensure a `sprint/YYYY-MM-DD` label exists (create it under the `sprint/` group if missing), then apply it to the committed issues. To roll over, re-tag unfinished issues with the new sprint label.
 
 ### Set a dependency
 On the blocked issue: add the **blocked by → \<blocker\>** relation (search by name; cross-team OK) and the `blocked` label. Remove `blocked` when it clears.

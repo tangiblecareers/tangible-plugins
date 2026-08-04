@@ -8,7 +8,8 @@ work in Linear (via the Linear MCP). Full rules: `skills/tangible-linear/SKILL.m
 
 - **Sprints are `sprint/YYYY-MM-DD` LABELS** (the sprint's Monday, ISO) — **NOT** Linear Cycles.
 - **Label taxonomy only** (lowercase): `business-req`, `engineering-goal`, `ai-eval`,
-  `backend`, `frontend`, `tech-debt`, `blocked`, `docs`, `sprint/YYYY-MM-DD`. Don't invent labels.
+  `backend`, `frontend`, `security`, `performance`, `bug`, `tech-debt`, `blocked`, `docs`,
+  `sprint/YYYY-MM-DD`. Don't invent labels. See `workspace.json` for the seeded taxonomy.
 - **Status hygiene:** move Todo → In Progress on pickup, → Done when finished; never batch.
 - **Dependencies:** `blocked by` relation **+** the `blocked` label; incidental cross-effect → `related`.
 - **Project** only if it can END; forever-buckets are labeled backlog issues, not projects.
@@ -19,4 +20,4 @@ work in Linear (via the Linear MCP). Full rules: `skills/tangible-linear/SKILL.m
 - "what's on my plate", "gather my work for sprint planning" → the 3-bucket work dump
 - "plan the sprint", "commit these to the sprint" → the `sprint/YYYY-MM-DD` label workflow
 
-Teams: **Engineering** (`ENG`) · **AI Research** (`AIR`) · **Business/Company** (`BIZ`). Questions → **Aaryash**.
+Teams: **Engineering** (`ENG`) · **AI Research** (`AIR`) · **Business/Company** (`BIZ`) · **Tangible Founder** (programs/workshops). Questions → **Aaryash**.

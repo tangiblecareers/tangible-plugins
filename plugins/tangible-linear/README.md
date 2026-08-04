@@ -55,7 +55,12 @@ the package's `pi.skills` entry (`package.json`) and any `<repo>/.agents/skills/
 ## What you get
 
 - **Skill `tangible-linear`** — auto-applies whenever you create/update/organize Linear work.
-- **Claude Code commands:** `/linear`, `/linear-dump`, `/sprint-plan`.
+- **Skill `linear-organize`** — audits/structures the workspace into the initiative hierarchy.
+- **Claude Code commands:** `/linear`, `/linear-dump`, `/sprint-plan`, `/linear-organize`,
+  `/linear-lint`, `/linear-onboard`.
+- **`workspace.json`** — the seeded source of truth (teams, people, taxonomy, sprint anchor,
+  live initiatives) that the skills read before acting.
+- New here? See [`ONBOARDING.md`](ONBOARDING.md).
 - Full reference in `skills/tangible-linear/guidelines.md`.
 
 ## Prerequisite

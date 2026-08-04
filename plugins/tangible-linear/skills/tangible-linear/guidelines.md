@@ -80,6 +80,11 @@ A team has its own backlog and settings. We have two:
 - Works independently on a **lightweight backlog** — no strict sprints
 - Engineering depends on its deliverables (e.g. Skill Map v1)
 
+### Business/Company & Tangible Founder
+Two more teams exist in the workspace: **Business/Company** (client/company projects) and
+**Tangible Founder** (founder-led programs & workshops — EU UDAAN, YI Lab, AI for
+Entrepreneurs). Neither runs Engineering's sprint cadence. See `workspace.json` → `teams`.
+
 **Rule of thumb:** different *roles* (backend vs frontend) do **not** mean different
 teams — we're one Engineering team. Teams split only when the work rhythm is genuinely
 different, which is why AI Research is separate.
@@ -182,6 +187,9 @@ Labels categorize issues across all projects. Apply as many as genuinely fit.
 | `ai-eval` | AI evaluation work — the AI pipeline, eval prompts, scoring, AI interview, benchmarking, model tuning. |
 | `backend` | Server-side — Express APIs, services, Postgres, migrations, auth, AWS/pm2. |
 | `frontend` | Client-side — React UI, components, state, styling. |
+| `security` | Security / access-control — authn/authz, RBAC, XSS, secrets, CSP, token handling, IDOR. Pair with `backend`/`frontend`. |
+| `performance` | Performance — render/re-render cost, store subscriptions, caching/query efficiency, bundle size. Pair with `backend`/`frontend`. |
+| `bug` | Defect fix — a broken behavior, not new work (`engineering-goal`) or cleanup (`tech-debt`). Lowercase; migrate the legacy capitalized `Bug`. |
 | `tech-debt` | Refactors, cleanup, code-health work that isn't a feature or bug. |
 | `blocked` | Issue is waiting on a dependency, another team, or a decision. Remove once unblocked. |
 | `docs` | Documentation — API docs, knowledge-base entries, README/CLAUDE.md updates. |
@@ -212,6 +220,18 @@ Why this format:
 - **Self-documenting** — the label tells you when the sprint ran, no lookup needed
 - **Sorts chronologically** on its own (ISO dates sort alphabetically)
 - **Groups together** under the `sprint/` prefix, away from `backend`, `bug`, etc.
+
+**The anchor (so the current sprint is computable, not guessed):** sprint Mondays are
+anchored on **`2026-06-15`**. Every sprint starts on a Monday that is an exact multiple
+of **14 days** after the anchor. To get the current sprint label deterministically:
+
+```bash
+python3 -c "import datetime as d; a=d.date(2026,6,15); t=d.date.today(); print('sprint/'+(a+d.timedelta(days=14*((t-a).days//14))).isoformat())"
+```
+
+(e.g. on 2026-07-23 this prints `sprint/2026-07-13`; the following sprint is
+`sprint/2026-07-27`.) **Never eyeball which Monday it is — compute it.** If the team
+re-anchors the cadence, update this date here (and in `workspace.json`).
 
 **How a sprint runs:**
 1. At **sprint planning**, tag the issues you're committing to with the current
@@ -266,7 +286,8 @@ projects + legacy decommission).
 **Important:** initiatives are for goals that **end**, not permanent categories. Don't
 create an initiative called "Engineering Goals" — it never finishes and the progress bar
 becomes meaningless. Use **labels** for permanent categories; use **initiatives** only
-for real, finishable goals. As a small team we use them rarely.
+for real, finishable goals. As a small team we use them rarely. The current set of
+workspace initiatives (all finishable) is catalogued in the `linear-organize` skill.
 
 **How to create one:** Initiatives in the sidebar → *New initiative*, then attach the
 relevant projects. (May require a paid plan.)
