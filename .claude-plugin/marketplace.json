@@ -24,6 +24,10 @@
         "ref": "main"
       },
       "description": "Authors Problem-Based Learning courses in Tangible from a single brief — six human approval gates, staging/production switching, the web app used only as a viewer.",
+      "version": "0.1.0",
+      "category": "development"
+    },
+    {
       "name": "tangible-git",
       "source": {
         "source": "git-subdir",
