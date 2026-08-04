@@ -1,7 +1,10 @@
 {
   "name": "tangible",
   "description": "Tangible Careers internal AI-agent plugins (company use only)",
-  "owner": { "name": "Tangible Careers", "email": "kaushal.mishra@tangible.careers" },
+  "owner": {
+    "name": "Tangible Careers",
+    "email": "kaushal.mishra@tangible.careers"
+  },
   "plugins": [
     {
       "name": "tangible-linear",

@@ -2,6 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **This plan was executed on 2026-08-04 and is now a historical record.** Two
+> Critical findings from the whole-branch review changed the design after the
+> tasks were written: the `sync-marketplace` job moved from the release pull
+> request to `main` (release-please's `GITHUB_TOKEN` pull requests raise no
+> `pull_request` event, so the job could never have run), and
+> `release-please-config.json` gained a `last-release-sha`. The Task 4 and
+> Task 5 YAML below is therefore **not** what shipped. For the current design,
+> read `docs/superpowers/specs/2026-08-04-plugin-release-automation-design.md`;
+> for what shipped, read the files themselves.
+
 **Goal:** A merge to `main` bumps a plugin's version in every manifest automatically, and a stale `dist/` fails CI.
 
 **Architecture:** `plugins/<name>/.claude-plugin/plugin.json` becomes the canonical version. release-please owns commit parsing, version math, changelogs and tags, writing only files inside each plugin directory. A dependency-free `scripts/sync-marketplace.mjs` derives the root `.claude-plugin/marketplace.json` versions from the canonical files, and `scripts/validate.mjs` fails CI if that derivation is ever out of date.
@@ -427,6 +437,9 @@ jobs:
   release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-please-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: googleapis/release-please-action@v4
         with:
@@ -434,12 +447,19 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   sync-marketplace:
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
+    concurrency:
+      group: sync-marketplace-${{ github.head_ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -452,11 +472,13 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .claude-plugin/marketplace.json
             git commit -m "chore: sync marketplace versions"
-            git push
+            git push origin HEAD:${{ github.head_ref }}
           fi
 ```
 
 The sync runs on the release pull request branch rather than on `main` afterwards, so one merge yields one consistent state and the marketplace never disagrees with the plugins on `main`.
+
+The `concurrency:` blocks, the fork guard, and the explicit push refspec were added after implementation review flagged the originals as resting on undeclared `actions/checkout` defaults and as racing with release-please's own pushes to the release branch. See the design spec's Workflows section for why each is load-bearing.
 
 - [ ] **Step 2: Verify the YAML parses**
 

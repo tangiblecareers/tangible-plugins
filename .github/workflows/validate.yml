@@ -15,3 +15,23 @@ jobs:
           node-version: "20"
       - name: Validate marketplace + plugins
         run: node scripts/validate.mjs
+
+  dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install and rebuild tangible-pbl
+        working-directory: plugins/tangible-pbl
+        run: |
+          npm ci
+          npm run build
+      - name: Fail if dist/ is stale
+        run: |
+          if [ -n "$(git status --porcelain -- plugins/tangible-pbl/dist)" ]; then
+            echo "dist/ does not match a clean build:"
+            git status --short -- plugins/tangible-pbl/dist
+            exit 1
+          fi

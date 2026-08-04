@@ -6,6 +6,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectVersions, planUpdates } from './sync-marketplace.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const errors = [];
@@ -65,6 +66,14 @@ for (const name of pluginDirs) {
   const gemJson = join(dir, 'gemini-extension.json');
   if (existsSync(gemJson)) { const j = readJSON(gemJson); if (j) versions['gemini-extension.json'] = j.version; }
 
+  for (const eco of ['.codex-plugin', '.cursor-plugin']) {
+    const ecoJson = join(dir, eco, 'plugin.json');
+    if (existsSync(ecoJson)) {
+      const j = readJSON(ecoJson);
+      if (j) versions[`${eco}/plugin.json`] = j.version;
+    }
+  }
+
   if (marketVersions.has(name)) versions['marketplace.json'] = marketVersions.get(name);
 
   // Version sync
@@ -99,6 +108,28 @@ for (const name of pluginDirs) {
   // workspace.json (optional) must at least parse if present
   const wsJson = join(dir, 'workspace.json');
   if (existsSync(wsJson)) readJSON(wsJson);
+}
+
+// 3. Marketplace versions must be derived, not hand-written
+// Intentional overlap with section 2's drift check: section 2 keys off the
+// plugin *directory* name, while this check keys off plugin.json's `name`
+// field, so it also catches a directory/name mismatch that section 2 cannot see.
+if (marketplace) {
+  for (const s of planUpdates(marketplace, collectVersions(ROOT))) {
+    err(`marketplace.json: "${s.name}" is ${s.from} but plugin.json says ${s.to} — run node scripts/sync-marketplace.mjs`);
+  }
+}
+
+// 4. Every plugin should be registered for automated releases
+const releaseCfgPath = join(ROOT, 'release-please-config.json');
+const releaseCfg = existsSync(releaseCfgPath) ? readJSON(releaseCfgPath) : null;
+if (!releaseCfg) err('release-please-config.json is missing or unparseable');
+else {
+  for (const name of pluginDirs) {
+    if (!releaseCfg.packages?.[`plugins/${name}`]) {
+      warn(`plugins/${name}: not registered in release-please-config.json — releases are manual`);
+    }
+  }
 }
 
 // Report
