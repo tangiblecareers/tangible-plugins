@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets you re-run release-please without pushing to main — needed whenever a
+  # release branch has to be discarded and rebuilt.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,7 +14,7 @@ permissions:
 
 jobs:
   release:
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     concurrency:
       group: release-please-${{ github.ref }}
