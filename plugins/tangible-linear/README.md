@@ -73,3 +73,12 @@ equivalent). This plugin is the conventions layer on top of those tools.
 This distributes the **conventions** (a skill/instructions). It is not an MCP server and
 does not itself perform Linear writes — your agent does that through Linear's MCP. See
 `skills/tangible-linear/SKILL.md` for the rules.
+
+## Versioning
+
+This plugin's version lives in five manifests — `package.json`,
+`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+`.cursor-plugin/plugin.json` and `gemini-extension.json` — plus the marketplace
+entry. **Do not edit any of them by hand.** They are written automatically from
+your conventional commits; see the *Releasing* section of the
+[repository README](../../README.md).
