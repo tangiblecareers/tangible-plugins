@@ -6,6 +6,7 @@ import { SessionStore } from './session/store.js';
 export interface Runtime {
     cfg: Config;
     env: Env;
+    apiUrl: string;
     appUrl: string;
     http: HttpClient;
     auth: AuthManager;

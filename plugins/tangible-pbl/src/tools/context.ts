@@ -18,6 +18,11 @@ export const registerContextTools = (
       return text(
         [
           `Environment: ${banner(current)}`,
+          // The resolved API URL is the single most useful thing when a call
+          // fails: a 404 is almost always a misconfigured base URL or the
+          // wrong environment, and neither is visible from the banner alone.
+          `API: ${current.apiUrl}`,
+          `App: ${current.appUrl}`,
           ctx
             ? `Business: ${ctx.businessName} (${ctx.businessRole})`
             : 'Business: none selected — call pbl_use_business',

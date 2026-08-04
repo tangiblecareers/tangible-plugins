@@ -35,6 +35,21 @@ const errorMessage = (body: unknown, status: number): string => {
       const m = (b.stack as { message?: unknown }).message;
       if (typeof m === 'string') return m;
     }
+    // Express's own 404 handler returns { status, success, error, path, method }
+    // with no `message`, so an unrouted path used to surface as a bare status
+    // with nothing to act on. Name the path that missed.
+    const { error, path, method } = b as {
+      error?: unknown;
+      path?: unknown;
+      method?: unknown;
+    };
+    if (typeof error === 'string') {
+      const where =
+        typeof path === 'string'
+          ? ` — ${typeof method === 'string' ? `${method} ` : ''}${path}`
+          : '';
+      return `${error}${where}`;
+    }
   }
   return `Tangible API request failed with status ${status}`;
 };

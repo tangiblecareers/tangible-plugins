@@ -62,6 +62,38 @@ describe('createHttpClient', () => {
     await expect(http.request({ method: 'GET', path: 'x' })).rejects.toThrow('deep');
   });
 
+  // Express's 404 handler carries `error`/`path`/`method` and NO `message`.
+  // Before this, an unrouted path surfaced as a bare "failed with status 404",
+  // which cost real debugging time against the live API.
+  it('names the path when a route does not exist', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      json(
+        {
+          status: 404,
+          success: false,
+          error: 'Not Found',
+          path: '/tangible/v1/user/business',
+          method: 'GET',
+        },
+        404,
+      ),
+    );
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    await expect(http.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      'Not Found — GET /tangible/v1/user/business',
+    );
+  });
+
+  it('prefers message over error when both are present', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(json({ message: 'real reason', error: 'Bad Request' }, 400));
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    await expect(http.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      'real reason',
+    );
+  });
+
   it('survives a non-JSON error body', async () => {
     const fetchImpl = vi
       .fn()

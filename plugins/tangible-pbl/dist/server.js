@@ -12,6 +12,7 @@ export const createRuntime = (cfg, env = cfg.active) => {
     return {
         cfg,
         env,
+        apiUrl: ec.apiUrl,
         appUrl: ec.appUrl,
         http,
         auth: new AuthManager(http, { email: ec.email, password: ec.password }),
