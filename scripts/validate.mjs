@@ -65,6 +65,14 @@ for (const name of pluginDirs) {
   const gemJson = join(dir, 'gemini-extension.json');
   if (existsSync(gemJson)) { const j = readJSON(gemJson); if (j) versions['gemini-extension.json'] = j.version; }
 
+  for (const eco of ['.codex-plugin', '.cursor-plugin']) {
+    const ecoJson = join(dir, eco, 'plugin.json');
+    if (existsSync(ecoJson)) {
+      const j = readJSON(ecoJson);
+      if (j) versions[`${eco}/plugin.json`] = j.version;
+    }
+  }
+
   if (marketVersions.has(name)) versions['marketplace.json'] = marketVersions.get(name);
 
   // Version sync
