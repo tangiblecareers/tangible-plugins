@@ -117,6 +117,18 @@ if (marketplace) {
   }
 }
 
+// 4. Every plugin should be registered for automated releases
+const releaseCfgPath = join(ROOT, 'release-please-config.json');
+const releaseCfg = existsSync(releaseCfgPath) ? readJSON(releaseCfgPath) : null;
+if (!releaseCfg) err('release-please-config.json is missing or unparseable');
+else {
+  for (const name of pluginDirs) {
+    if (!releaseCfg.packages?.[`plugins/${name}`]) {
+      warn(`plugins/${name}: not registered in release-please-config.json — releases are manual`);
+    }
+  }
+}
+
 // Report
 for (const w of warnings) console.log(`  ⚠ ${w}`);
 if (errors.length) {
