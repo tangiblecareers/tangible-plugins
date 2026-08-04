@@ -16,6 +16,14 @@
       "category": "productivity"
     },
     {
+      "name": "tangible-pbl",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/tangiblecareers/tangible-plugins",
+        "path": "plugins/tangible-pbl",
+        "ref": "main"
+      },
+      "description": "Authors Problem-Based Learning courses in Tangible from a single brief — six human approval gates, staging/production switching, the web app used only as a viewer.",
       "name": "tangible-git",
       "source": {
         "source": "git-subdir",
