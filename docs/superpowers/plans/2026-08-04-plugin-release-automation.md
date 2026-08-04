@@ -2,6 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **This plan was executed on 2026-08-04 and is now a historical record.** Two
+> Critical findings from the whole-branch review changed the design after the
+> tasks were written: the `sync-marketplace` job moved from the release pull
+> request to `main` (release-please's `GITHUB_TOKEN` pull requests raise no
+> `pull_request` event, so the job could never have run), and
+> `release-please-config.json` gained a `last-release-sha`. The Task 4 and
+> Task 5 YAML below is therefore **not** what shipped. For the current design,
+> read `docs/superpowers/specs/2026-08-04-plugin-release-automation-design.md`;
+> for what shipped, read the files themselves.
+
 **Goal:** A merge to `main` bumps a plugin's version in every manifest automatically, and a stale `dist/` fails CI.
 
 **Architecture:** `plugins/<name>/.claude-plugin/plugin.json` becomes the canonical version. release-please owns commit parsing, version math, changelogs and tags, writing only files inside each plugin directory. A dependency-free `scripts/sync-marketplace.mjs` derives the root `.claude-plugin/marketplace.json` versions from the canonical files, and `scripts/validate.mjs` fails CI if that derivation is ever out of date.
