@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.tsbuildinfo
+
+# dist/ is deliberately NOT ignored — `/plugin install` fetches files via
+# git-subdir and never runs a build, so the compiled server must be committed
+# for the plugin to work on install.

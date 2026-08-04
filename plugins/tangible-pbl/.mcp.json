@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "pbl": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "env": {
+        "TANGIBLE_ENV": "${TANGIBLE_ENV:-staging}",
+        "TANGIBLE_STAGING_API_URL": "${TANGIBLE_STAGING_API_URL:-https://tg-dev.arbyte.solutions/tangible/v1}",
+        "TANGIBLE_STAGING_APP_URL": "${TANGIBLE_STAGING_APP_URL:-https://tg-dev.netlify.app}",
+        "TANGIBLE_STAGING_EMAIL": "${TANGIBLE_STAGING_EMAIL}",
+        "TANGIBLE_STAGING_PASSWORD": "${TANGIBLE_STAGING_PASSWORD}",
+        "TANGIBLE_PRODUCTION_API_URL": "${TANGIBLE_PRODUCTION_API_URL}",
+        "TANGIBLE_PRODUCTION_APP_URL": "${TANGIBLE_PRODUCTION_APP_URL:-https://app.tangible.careers}",
+        "TANGIBLE_PRODUCTION_EMAIL": "${TANGIBLE_PRODUCTION_EMAIL}",
+        "TANGIBLE_PRODUCTION_PASSWORD": "${TANGIBLE_PRODUCTION_PASSWORD}"
+      }
+    }
+  }
+}
