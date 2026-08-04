@@ -86,9 +86,11 @@ move the version.
    job pushes a `chore: sync marketplace versions` commit updating
    `.claude-plugin/marketplace.json`.
 
-Between steps 3 and 4 the marketplace briefly lags the plugin manifests, so a
-`validate` run landing in that window reports drift. It resolves itself one job
-later. See
+Between steps 3 and 4 the marketplace briefly lags the plugin manifests. The
+`validate` workflow's own run on a release merge always lands inside that
+window, so **expect it to be red on release merges — that one is not
+meaningful.** The `release` workflow re-runs the same validation after syncing;
+that result is the one to read. See
 [the design spec](docs/superpowers/specs/2026-08-04-plugin-release-automation-design.md)
 for why the sync runs on `main` rather than inside the release PR.
 

@@ -45,3 +45,10 @@ jobs:
             git commit -m "chore: sync marketplace versions"
             git push origin HEAD:main
           fi
+      # validate.yml's own run on this push saw main mid-release: the plugin
+      # manifests were bumped but marketplace.json was not yet synced, so it
+      # failed on drift. The sync commit above is pushed with GITHUB_TOKEN and
+      # raises no event, so nothing re-runs it. This step is the authoritative
+      # check on the state main is actually left in.
+      - name: Verify main is consistent after sync
+        run: node scripts/validate.mjs

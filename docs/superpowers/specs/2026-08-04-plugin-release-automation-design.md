@@ -328,9 +328,16 @@ The alternative was a long-lived credential; we took the one-job window instead.
   marketplace will stop tracking the plugin manifests. The failure is loud — the
   job goes red, and `validate` on the next push reports the stale entry by name —
   but it needs a human to act on it.
-- **`marketplace.json` lags by one job after every release.** Accepted; see "Why
-  the sync runs on `main`." A `validate` run that lands inside that window
-  reports a stale marketplace correctly, which reads as a spurious failure.
+- **`marketplace.json` lags by one job after every release, and `validate.yml`'s
+  own run will always land inside that window.** The release merge fires both
+  workflows in parallel; `validate` sees bumped plugin manifests beside an
+  unsynced `marketplace.json` and fails on drift. Because the sync commit is
+  pushed with `GITHUB_TOKEN` it raises no event, so nothing re-runs `validate` —
+  `main` would sit red with correct contents. Mitigated by a final
+  `node scripts/validate.mjs` step in the sync job, which is the authoritative
+  check on the state `main` is actually left in. `validate.yml`'s own run on a
+  release merge is expected to be red and can be ignored; the `release`
+  workflow's result is the one to read.
 - **The `dist` gate covers `tangible-pbl` only**, because it is the only plugin
   that compiles anything. Any future plugin with a build step needs its own job
   or a generalisation of this one.
