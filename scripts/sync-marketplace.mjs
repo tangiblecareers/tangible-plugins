@@ -19,7 +19,12 @@ export function collectVersions(root = ROOT) {
     if (!statSync(join(pluginsDir, dir)).isDirectory()) continue;
     const manifest = join(pluginsDir, dir, '.claude-plugin', 'plugin.json');
     if (!existsSync(manifest)) continue;
-    const j = JSON.parse(readFileSync(manifest, 'utf8'));
+    let j;
+    try {
+      j = JSON.parse(readFileSync(manifest, 'utf8'));
+    } catch {
+      continue; // validate.mjs reports the malformed file via its own readJSON
+    }
     if (j.name && j.version) out.set(j.name, j.version);
   }
   return out;

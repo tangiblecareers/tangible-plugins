@@ -111,6 +111,9 @@ for (const name of pluginDirs) {
 }
 
 // 3. Marketplace versions must be derived, not hand-written
+// Intentional overlap with section 2's drift check: section 2 keys off the
+// plugin *directory* name, while this check keys off plugin.json's `name`
+// field, so it also catches a directory/name mismatch that section 2 cannot see.
 if (marketplace) {
   for (const s of planUpdates(marketplace, collectVersions(ROOT))) {
     err(`marketplace.json: "${s.name}" is ${s.from} but plugin.json says ${s.to} — run node scripts/sync-marketplace.mjs`);

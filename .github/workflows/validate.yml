@@ -29,4 +29,9 @@ jobs:
           npm ci
           npm run build
       - name: Fail if dist/ is stale
-        run: git diff --exit-code -- plugins/tangible-pbl/dist
+        run: |
+          if [ -n "$(git status --porcelain -- plugins/tangible-pbl/dist)" ]; then
+            echo "dist/ does not match a clean build:"
+            git status --short -- plugins/tangible-pbl/dist
+            exit 1
+          fi

@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "last-release-sha": "6cff6619b983c42bce329bb8c64ae3071d03eab0",
   "separate-pull-requests": true,
   "packages": {
     "plugins/tangible-linear": {
