@@ -44,6 +44,69 @@ and Pi (so `git pull` keeps everyone current). This path is for the skill-based 
   [`plugins/tangible-pbl/README.md`](plugins/tangible-pbl/README.md). The account needs
   `ADMIN` or `MANAGER` on the business being authored into.
 
+## Releasing
+
+**You never edit a version by hand.** Every plugin's version lives in up to six
+manifests; writing one and forgetting the others is what used to cause drift.
+
+`plugins/<name>/.claude-plugin/plugin.json` is the canonical version. Everything
+else is written for you:
+
+| File | Written by |
+|---|---|
+| `plugins/<name>/package.json` | release-please |
+| `plugins/<name>/.claude-plugin/plugin.json` | release-please |
+| `plugins/<name>/gemini-extension.json` | release-please |
+| `plugins/<name>/.codex-plugin/plugin.json` | release-please |
+| `plugins/<name>/.cursor-plugin/plugin.json` | release-please |
+| `.claude-plugin/marketplace.json` | `scripts/sync-marketplace.mjs`, in CI |
+
+### What you do
+
+Commit with a conventional message whose changes land under the plugin's
+directory. release-please routes commits by **path**, not by scope:
+
+```
+feat(tangible-pbl): add sub-content-unit creation     → minor bump
+fix(tangible-pbl): stop leaking the courseId          → patch bump
+docs(tangible-pbl): clarify the approval gates        → no release
+```
+
+Only `feat:` and `fix:` cut a release. Everything else still ships to users —
+delivery is `ref: main`, so users get whatever is on `main` — it just doesn't
+move the version.
+
+### What happens then
+
+1. You merge to `main`.
+2. release-please opens a **release PR** for each plugin with new `feat:`/`fix:`
+   commits, bumping every in-package manifest and writing a CHANGELOG.
+3. You merge the release PR.
+4. That merge tags `<plugin>-v<version>`, cuts a GitHub Release, and a follow-up
+   job pushes a `chore: sync marketplace versions` commit updating
+   `.claude-plugin/marketplace.json`.
+
+Between steps 3 and 4 the marketplace briefly lags the plugin manifests, so a
+`validate` run landing in that window reports drift. It resolves itself one job
+later. See
+[the design spec](docs/superpowers/specs/2026-08-04-plugin-release-automation-design.md)
+for why the sync runs on `main` rather than inside the release PR.
+
+### Guardrails
+
+`node scripts/validate.mjs` runs on every PR and fails if any manifest disagrees
+with another, or if `marketplace.json` was hand-edited. Run it locally before
+pushing.
+
+For `tangible-pbl` specifically, CI rebuilds `dist/` and fails if the committed
+output differs from a clean build — `/plugin install` never runs a build, so a
+source change without a rebuilt `dist/` would ship a stale server to everyone.
+**Rebuild and commit `dist/` with any source change.**
+
+The three scaffold plugins are not registered for automated releases (they have
+no `package.json`). `validate.mjs` warns about each one on every run; that is
+expected, not a failure.
+
 ## Access
 
 Private to the `tangiblecareers` org. Not for external distribution.

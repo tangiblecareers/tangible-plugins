@@ -1,7 +1,9 @@
 # Plugin release automation — design
 
 Date: 2026-08-04
-Status: approved, not yet implemented
+Status: implemented on `feat/release-automation`; reviewed and revised after the
+whole-branch review moved the marketplace sync from the release pull request to
+`main`. This document describes what shipped.
 
 ## Problem
 
@@ -101,6 +103,7 @@ form release-please supports:
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "separate-pull-requests": true,
+  "last-release-sha": "6cff6619b983c42bce329bb8c64ae3071d03eab0",
   "packages": {
     "plugins/tangible-linear": {
       "release-type": "node",
