@@ -194,7 +194,39 @@ Release carrying the changelog. Permissions: `contents: write`,
 `node scripts/sync-marketplace.mjs`, and commits and pushes
 `.claude-plugin/marketplace.json` to `main` if it changed.
 
-#### Why the sync runs on `main` and not on the release pull request
+#### Correction, 2026-08-04, after the first real run
+
+Everything in the subsection below was **wrong**, and is kept only so the
+mistake is legible. The whole-branch review asserted that release-please's pull
+requests raise no `pull_request` event because they are opened under
+`GITHUB_TOKEN`. The first production run disproved it — `validate` ran on both
+release pull request branches with `event=pull_request`:
+
+```
+30893398973  validate  event=pull_request  branch=release-please--…--tangible-linear
+30893398813  validate  event=pull_request  branch=release-please--…--tangible-pbl
+```
+
+The no-retrigger rule is real but did not apply here. The sync has been moved
+back to the `pull_request` trigger, which is the design originally approved.
+
+Two things that same run also taught, both now fixed:
+
+- **`needs: release` was a trap.** The `release` job failed on a label race and
+  the sync was *skipped entirely* rather than merely delayed. The scoped
+  re-review flagged this coupling as a Minor; it fired on the first run. The
+  sync no longer depends on the release job.
+- **Merge commits inflate versions.** GitHub writes the pull request title into
+  the merge commit body, so merging
+  `feat(marketplace): automate plugin version releases` produced a commit whose
+  diff touched `plugins/tangible-linear/` and which release-please read as a
+  feature against that plugin — cutting `1.2.0` where the real change was a
+  manifest fix. `git log <range> -- <path>` hides merge commits by default,
+  which is why the pre-merge verification missed it; `--full-history` shows
+  them. The repository is now rebase-merge only. Squash is disabled too: a
+  squash commit carries the same pull request title across every touched path.
+
+#### Why the sync ran on `main` and not on the release pull request (superseded)
 
 The first design put this job on `pull_request` filtered to
 `release-please--*` head branches, so the marketplace update would land *inside*

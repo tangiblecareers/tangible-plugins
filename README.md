@@ -81,18 +81,17 @@ move the version.
 1. You merge to `main`.
 2. release-please opens a **release PR** for each plugin with new `feat:`/`fix:`
    commits, bumping every in-package manifest and writing a CHANGELOG.
-3. You merge the release PR.
-4. That merge tags `<plugin>-v<version>`, cuts a GitHub Release, and a follow-up
-   job pushes a `chore: sync marketplace versions` commit updating
-   `.claude-plugin/marketplace.json`.
+3. A job on that PR syncs `.claude-plugin/marketplace.json` into it, so the PR
+   carries a complete, self-consistent version bump.
+4. You merge the release PR. That tags `<plugin>-v<version>` and cuts a GitHub
+   Release.
 
-Between steps 3 and 4 the marketplace briefly lags the plugin manifests. The
-`validate` workflow's own run on a release merge always lands inside that
-window, so **expect it to be red on release merges — that one is not
-meaningful.** The `release` workflow re-runs the same validation after syncing;
-that result is the one to read. See
-[the design spec](docs/superpowers/specs/2026-08-04-plugin-release-automation-design.md)
-for why the sync runs on `main` rather than inside the release PR.
+**Merge with rebase.** The repo allows rebase only, and that is load-bearing:
+a merge commit (or a squash) carries the *pull request title* as its message
+across every path the branch touched. A PR titled `feat(...)` that happens to
+touch `plugins/tangible-linear/` will cut a minor release for that plugin even
+if the change was a one-line fix. This is not hypothetical — it happened, and
+it is why `tangible-linear` briefly showed a spurious `1.2.0`.
 
 ### Guardrails
 
