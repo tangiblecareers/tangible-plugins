@@ -427,6 +427,9 @@ jobs:
   release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-please-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: googleapis/release-please-action@v4
         with:
@@ -434,12 +437,19 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   sync-marketplace:
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
+    concurrency:
+      group: sync-marketplace-${{ github.head_ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -452,11 +462,13 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .claude-plugin/marketplace.json
             git commit -m "chore: sync marketplace versions"
-            git push
+            git push origin HEAD:${{ github.head_ref }}
           fi
 ```
 
 The sync runs on the release pull request branch rather than on `main` afterwards, so one merge yields one consistent state and the marketplace never disagrees with the plugins on `main`.
+
+The `concurrency:` blocks, the fork guard, and the explicit push refspec were added after implementation review flagged the originals as resting on undeclared `actions/checkout` defaults and as racing with release-please's own pushes to the release branch. See the design spec's Workflows section for why each is load-bearing.
 
 - [ ] **Step 2: Verify the YAML parses**
 

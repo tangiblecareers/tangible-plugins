@@ -182,8 +182,9 @@ request per plugin with changed `feat:`/`fix:` commits; on merge it tags
 (`tangible-pbl-v0.1.1`) and cuts a GitHub Release carrying the changelog.
 Permissions: `contents: write`, `pull-requests: write`.
 
-**`sync-marketplace` — on `pull_request` where `github.head_ref` starts with
-`release-please--`.** Checks out the pull request branch, runs
+**`sync-marketplace` — on `pull_request` where the head branch starts with
+`release-please--` *and* the pull request originates from this repository, not a
+fork.** Checks out the pull request branch, runs
 `node scripts/sync-marketplace.mjs`, and commits and pushes if the file changed.
 
 The sync deliberately lands *inside* the release pull request rather than as a
@@ -191,6 +192,27 @@ bot commit on `main` afterwards. One merge produces one consistent state, and
 there is never a window where the marketplace disagrees with the plugins.
 `GITHUB_TOKEN` can push to same-repo pull request branches; those pushes do not
 retrigger workflows, which is acceptable because nothing needs to run after.
+
+Three details were added during implementation review, and are load-bearing
+rather than decorative:
+
+- **Both jobs declare `concurrency:`.** release-please pushes to its own release
+  pull request branch to keep it current, which fires `synchronize` and
+  re-triggers the sync job. Without a concurrency group, two overlapping sync
+  runs mean the second `git push` is rejected non-fast-forward. `release` groups
+  on `github.ref` with `cancel-in-progress: false` (never interrupt a run that
+  may be cutting a tag); `sync-marketplace` groups on `github.head_ref` with
+  `cancel-in-progress: true` (a superseded sync has nothing worth finishing).
+- **The push is explicit:** `persist-credentials: true` on checkout and
+  `git push origin HEAD:${{ github.head_ref }}`. Both behaviours are
+  `actions/checkout` defaults today, so the bare form worked — but the job's
+  entire purpose is landing a commit, and that should not rest on an
+  undeclared default.
+- **The fork guard is explicit**
+  (`github.event.pull_request.head.repo.full_name == github.repository`).
+  Two implicit backstops already existed — a fork's head branch does not resolve
+  in the base repo, and GitHub downgrades `GITHUB_TOKEN` to read-only for
+  fork-originated `pull_request` events — but neither is stated in the workflow.
 
 ### dist freshness gate
 
@@ -253,6 +275,17 @@ not "any file changed."
   to `release-please--*` branches, that push will fail and the marketplace will
   fall out of sync inside the release pull request. `validate.mjs --check` would
   catch it on that same pull request, so the failure is loud rather than silent.
+- **`validate` and `sync-marketplace` race on a release pull request.** They are
+  separate workflows triggered by the same event, so `validate` can run and fail
+  *before* the sync job has pushed its marketplace commit, then pass on the
+  re-run the push triggers. Expect a transient red on release pull requests. If
+  that noise proves annoying, the fix is to make `validate` skip
+  `release-please--*` head branches and rely on the post-merge run on `main`.
+- **A cancelled sync run may have already pushed.** `cancel-in-progress: true`
+  can mark a run "cancelled" moments after its `git push` succeeded. Git state
+  stays consistent — a push cannot be unwound by cancellation — but the run's
+  reported conclusion will misrepresent what happened. This only matters if
+  `sync-marketplace` is ever made a required status check.
 - **The three scaffold plugins remain manual.** Intentional; revisit when they
   gain a `package.json`.
 
