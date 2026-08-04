@@ -10,6 +10,7 @@ import { registerDirectTools } from './tools/direct.js';
 export interface Runtime {
   cfg: Config;
   env: Env;
+  apiUrl: string;
   appUrl: string;
   http: HttpClient;
   auth: AuthManager;
@@ -23,6 +24,7 @@ export const createRuntime = (cfg: Config, env: Env = cfg.active): Runtime => {
   return {
     cfg,
     env,
+    apiUrl: ec.apiUrl,
     appUrl: ec.appUrl,
     http,
     auth: new AuthManager(http, { email: ec.email, password: ec.password }),
