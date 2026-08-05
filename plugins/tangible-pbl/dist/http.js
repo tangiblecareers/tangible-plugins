@@ -38,6 +38,12 @@ const errorMessage = (body, status) => {
     }
     return `Tangible API request failed with status ${status}`;
 };
+/**
+ * Course and business ids are UUIDs, and this codebase does not surface a UUID
+ * in any output — including error messages. Route shape is still useful, so
+ * keep the path and replace only the id segments.
+ */
+const redactIds = (path) => path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id');
 export const createHttpClient = (baseUrl, fetchImpl = fetch) => {
     const base = baseUrl.replace(/\/+$/, '');
     return {
@@ -65,7 +71,22 @@ export const createHttpClient = (baseUrl, fetchImpl = fetch) => {
             if (!res.ok) {
                 throw new TangibleApiError(errorMessage(parsed, res.status), res.status, parsed);
             }
-            return parsed?.payload;
+            // An empty body (204 and friends) legitimately carries nothing.
+            if (parsed === undefined)
+                return undefined;
+            if (parsed !== null && typeof parsed === 'object' && 'payload' in parsed) {
+                return parsed.payload;
+            }
+            // Previously this returned `parsed?.payload` unconditionally, so a body
+            // that wasn't enveloped yielded `undefined` in silence — which then
+            // travelled downstream as a missing course id and got persisted. Fail at
+            // the boundary instead, and name the keys so the real shape is obvious
+            // without a second round-trip.
+            const got = parsed !== null && typeof parsed === 'object'
+                ? `keys [${Object.keys(parsed).join(', ')}]`
+                : `${typeof parsed}`;
+            throw new TangibleApiError(`Unexpected response shape from ${method} ${redactIds(path)}: ` +
+                `expected a "payload" envelope, got ${got}`, res.status, parsed);
         },
     };
 };

@@ -104,3 +104,44 @@ describe('createHttpClient', () => {
     );
   });
 });
+
+/**
+ * Regression: every response was unwrapped with `parsed?.payload` and returned
+ * as-is. A body that is not enveloped yielded `undefined` silently, which then
+ * flowed downstream as a missing course id instead of failing at the boundary.
+ */
+describe('createHttpClient — response envelope', () => {
+  it('throws when an object body has no payload envelope, naming the keys it did have', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ id: 'c1', title: 'Intro' }));
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    const err = await http
+      .request({ method: 'POST', path: 'business/courses' })
+      .then(() => undefined, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(TangibleApiError);
+    expect(err!.message).toMatch(/payload/);
+    expect(err!.message).toMatch(/id/);
+    expect(err!.message).toMatch(/title/);
+  });
+
+  it('still returns undefined for an empty body, so 204-style responses keep working', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    await expect(
+      http.request({ method: 'DELETE', path: 'business/courses/x/invitations' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps a course UUID out of the wrong-shape error', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ id: 'c1' }));
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    const err = await http
+      .request({
+        method: 'GET',
+        path: 'business/courses/8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a',
+      })
+      .then(() => undefined, (e: unknown) => e as Error);
+    expect(err!.message).not.toContain('8f14e45f');
+    // Still says which route, so the message stays actionable.
+    expect(err!.message).toContain('business/courses');
+  });
+});

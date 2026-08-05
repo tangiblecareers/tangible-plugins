@@ -1179,3 +1179,91 @@ describe('pbl_resume', () => {
     expect(result.content[0].text).not.toContain('c1');
   });
 });
+
+/**
+ * Regression: a bricked memory file (see memory.test.ts) made pbl_abort throw
+ * on the load that precedes everything else — so the one tool that should have
+ * cleaned up the mess was the one tool that could not run. Removal stays the
+ * user's job (`rm`, by design — the store has no delete), but abort must say
+ * exactly what to remove instead of surfacing a raw parse error.
+ */
+describe('pbl_abort — unreadable memory file', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-abort-broken-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const brick = async (id: string) => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    await mkdir(join(root, 'staging'), { recursive: true });
+    // Exactly what the undefined-courseId bug produced on disk.
+    await writeFile(
+      join(root, 'staging', `${id}.md`),
+      '---\ncourse: "Test brief"\nenv: "staging"\ncourseId: undefined\n---\n\n# Test brief\n\n## Notes\nkeep me\n',
+      'utf8',
+    );
+  };
+
+  const stubHttp = (): HttpClient =>
+    ({ request: vi.fn().mockResolvedValue({ token: 'biz', businessRole: 'ADMIN' }) }) as unknown as HttpClient;
+
+  it('names the file and how to remove it, instead of throwing a parse error', async () => {
+    await brick('bricked');
+    const rtHolder = { current: await makeRuntime(stubHttp(), root) };
+    rtHolder.current.activeSessionId = 'bricked';
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_abort')!({ sessionId: 'bricked' });
+    const out = result.content[0].text;
+
+    expect(out).toContain(join(root, 'staging', 'bricked.md'));
+    expect(out).toMatch(/rm /);
+    // The underlying reason stays visible — the operator should know why.
+    expect(out).toMatch(/courseId/);
+  });
+
+  it('clears the active session pointer even though the file could not be read', async () => {
+    await brick('bricked');
+    const rtHolder = { current: await makeRuntime(stubHttp(), root) };
+    rtHolder.current.activeSessionId = 'bricked';
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_abort')!({ sessionId: 'bricked' });
+
+    // Without this, switchEnvironment stays blocked by a session that can
+    // never be closed — the user is wedged until they edit files by hand.
+    expect(rtHolder.current.activeSessionId).toBeUndefined();
+  });
+
+  it('leaves the unreadable file untouched rather than rewriting it', async () => {
+    await brick('bricked');
+    const file = join(root, 'staging', 'bricked.md');
+    const before = await readFile(file, 'utf8');
+    const rtHolder = { current: await makeRuntime(stubHttp(), root) };
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_abort')!({ sessionId: 'bricked' });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
+
+  it('still closes a readable session normally', async () => {
+    const rtHolder = { current: await makeRuntime(stubHttp(), root) };
+    await rtHolder.current.store.save({
+      id: 'fine', title: 'Fine', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step: 'context', awaitingApproval: true,
+      status: 'active', created: '2026-08-05T10:00:00.000Z',
+      updated: '2026-08-05T10:00:00.000Z',
+    } as CourseMemory);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_abort')!({ sessionId: 'fine' });
+
+    expect(result.content[0].text).toContain('Closed "Fine"');
+    expect((await rtHolder.current.store.load('staging', 'fine')).status).toBe('closed');
+  });
+});
