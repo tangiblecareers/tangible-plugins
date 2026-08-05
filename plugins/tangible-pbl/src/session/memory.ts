@@ -153,13 +153,18 @@ const hhmm = (d: Date): string =>
 export const renderEntry = (e: LogEntry, at: Date): string =>
   `### ${hhmm(at)} · ${e.step} — ${e.action}\n${e.detail}\n`;
 
+// The stored brief is trimmed so the round-trip is stable: section() also
+// trims on read, and trimming only on read (not on write) would mean a brief
+// saved with surrounding whitespace comes back different from what a second
+// save/load cycle of that same loaded value would produce. Trimming here
+// makes section()'s trim idempotent instead of lossy.
 const freshBody = (m: CourseMemory): string =>
   [
     `# ${m.title}`,
     `${m.env} · ${m.businessName}`,
     '',
     '## Brief',
-    m.brief,
+    m.brief.trim(),
     '',
     '## Log',
     '',
@@ -179,6 +184,11 @@ const insertEntry = (body: string, rendered: string): string => {
   return `${body.slice(0, at)}${rendered}\n${body.slice(at)}`;
 };
 
+// Per-call-unique so two concurrent saves of the same course never write the
+// same .tmp path — otherwise the second writeFile can clobber the first's
+// tmp before its rename, and one of the two renames then fails ENOENT.
+let tmpSeq = 0;
+
 export class CourseMemoryStore {
   constructor(
     private readonly root = join(homedir(), '.tangible-pbl-mcp', 'courses'),
@@ -197,12 +207,19 @@ export class CourseMemoryStore {
     const file = this.#file(m.env, m.id);
     await mkdir(this.#dir(m.env), { recursive: true });
 
-    let body: string;
+    // "File does not exist" is the only condition that means "start fresh".
+    // Reading and parsing are kept as separate steps so a malformed
+    // frontmatter block (a real, recoverable failure) can never be conflated
+    // with ENOENT and silently regenerated into freshBody — that would
+    // discard every prior log entry and any hand-typed Notes, exactly the
+    // data loss the append-only guarantee exists to prevent.
+    let existing: string | undefined;
     try {
-      body = splitDocument(await readFile(file, 'utf8'), file).body;
-    } catch {
-      body = freshBody(m);
+      existing = await readFile(file, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
+    let body = existing === undefined ? freshBody(m) : splitDocument(existing, file).body;
     if (entry) body = insertEntry(body, renderEntry(entry, this.now()));
 
     // The store — not the caller — owns `updated`: it is the only place that
@@ -211,7 +228,7 @@ export class CourseMemoryStore {
     // caller controlled this field nothing would ever advance it and every
     // one of those four call sites would have to remember to bump it itself.
     const next: CourseMemory = { ...m, updated: this.now().toISOString() };
-    const tmp = `${file}.tmp`;
+    const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
     await writeFile(tmp, `${serializeFrontmatter(next)}\n\n${body}`, 'utf8');
     // rename() is atomic on POSIX: a crash leaves either the previous file or
     // the complete new one, never a torn write.

@@ -129,6 +129,31 @@ describe('CourseMemoryStore', () => {
     expect((await store.load('staging', 'intro-to-systems-thinking')).brief).toBe(brief);
   });
 
+  it('normalizes a brief with surrounding whitespace so the stored document is stable', async () => {
+    // section() already trims on *read*, so load().brief comes back trimmed
+    // regardless of what freshBody wrote — that alone can't distinguish
+    // whether the write side normalizes. And once the file exists, save()
+    // never re-derives the body from m.brief (only a brand-new file goes
+    // through freshBody), so a second load().brief is trivially identical to
+    // the first either way. The only place freshBody's own trim is
+    // observable is the raw bytes written on the very first save — assert
+    // those directly, or this test cannot fail.
+    const brief = '\n\n  Line one\nLine two  \n\n';
+    await store.save(memory({ brief }));
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const onceText = await readFile(file, 'utf8');
+    expect(onceText).toContain('## Brief\nLine one\nLine two\n\n## Log');
+
+    const once = await store.load('staging', 'intro-to-systems-thinking');
+    expect(once.brief).toBe(brief.trim());
+
+    // A second save/load cycle of the already-loaded value is stable: the
+    // stored Brief text does not drift on repeated round-tripping.
+    await store.save(once);
+    const twice = await store.load('staging', 'intro-to-systems-thinking');
+    expect(twice.brief).toBe(once.brief);
+  });
+
   it('namespaces by environment', async () => {
     await store.save(memory());
     await expect(store.load('production', 'intro-to-systems-thinking')).rejects.toThrow(
@@ -207,6 +232,33 @@ describe('CourseMemoryStore', () => {
     expect(text).toContain('first entry');
     expect(text).toContain('second entry');
     expect(text.indexOf('first entry')).toBeLessThan(text.indexOf('second entry'));
+  });
+
+  it('rejects a save over corrupt frontmatter and leaves the file untouched', async () => {
+    await store.save(memory()); // ensures the staging directory exists
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const corrupt = [
+      '---',
+      'course: not-json',
+      '---',
+      '',
+      '## Log',
+      '',
+      '### 09:00 · context — approved',
+      'a prior entry that must survive',
+      '',
+      '## Notes',
+      'someone\'s hand-written note',
+      '',
+    ].join('\n');
+    await writeFile(file, corrupt, 'utf8');
+
+    await expect(store.save(memory())).rejects.toThrow(/not valid JSON/);
+
+    // The point: save() must not have regenerated the file from freshBody(m)
+    // when parsing failed — the original bytes, prior entry and hand-written
+    // note included, must still be there, untouched.
+    expect(await readFile(file, 'utf8')).toBe(corrupt);
   });
 
   it('rewrites frontmatter without touching the body when no entry is given', async () => {
