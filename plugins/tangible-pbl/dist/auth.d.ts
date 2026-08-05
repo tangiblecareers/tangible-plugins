@@ -19,6 +19,8 @@ export declare class AuthManager {
         password: string;
     });
     userToken(): Promise<string>;
+    /** The authenticated user's own id. Logs in if that has not happened yet. */
+    userId(): Promise<string>;
     loginBusiness(businessId: string, businessName: string): Promise<BusinessContext>;
     businessToken(): Promise<string>;
     context(): BusinessContext | undefined;

@@ -14,6 +14,7 @@ export interface BusinessContext {
  */
 export class AuthManager {
   #user?: string;
+  #userId?: string;
   #business?: string;
   #ctx?: BusinessContext;
 
@@ -24,13 +25,26 @@ export class AuthManager {
 
   async userToken(): Promise<string> {
     if (this.#user) return this.#user;
-    const res = await this.http.request<{ token: string }>({
+    const res = await this.http.request<{ id: string; token: string }>({
       method: 'POST',
       path: 'auth/login',
       body: { email: this.creds.email.trim(), password: this.creds.password },
     });
     this.#user = res.token;
+    // generateLoginResponse (backend/src/helpers/auth.helper.ts:69) returns the
+    // user id alongside the token. listBusinesses needs it to read the caller's
+    // own profile, which is the only place membership rows are exposed.
+    this.#userId = res.id;
     return res.token;
+  }
+
+  /** The authenticated user's own id. Logs in if that has not happened yet. */
+  async userId(): Promise<string> {
+    if (!this.#userId) await this.userToken();
+    if (!this.#userId) {
+      throw new Error('Login succeeded but returned no user id.');
+    }
+    return this.#userId;
   }
 
   async loginBusiness(businessId: string, businessName: string): Promise<BusinessContext> {
@@ -60,6 +74,7 @@ export class AuthManager {
 
   reset(): void {
     this.#user = undefined;
+    this.#userId = undefined;
     this.#business = undefined;
     this.#ctx = undefined;
   }
