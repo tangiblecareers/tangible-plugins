@@ -1,9 +1,34 @@
-/** GET user/business — frontend/src/api/endpoints.ts:168. */
+/**
+ * Business-portal roles. `business-course.route.ts` guards the whole /courses
+ * group with `isBusinessEducatorOrAbove`, so an EDUCATOR can author (scoped to
+ * their own courses by `scopeCoursesToCreatorIfEducator`). Mirrors the web
+ * app's `isBusinessRole` — frontend/src/access/roles.ts:111.
+ */
+const AUTHORING_ROLES = new Set(['MANAGER', 'BUSINESS_MANAGER', 'EDUCATOR']);
+/**
+ * There is no endpoint that lists a user's businesses. The web app derives the
+ * switcher list from the user profile's `usersInBusiness` rows
+ * (frontend/src/data/user/useUserTopNav.ts), and this does the same.
+ *
+ * The profile only carries `usersInBusiness` when you ask for your OWN id —
+ * `user.controller.ts:50` attaches it behind `USER_IS_SELF || USER_IS_SUPERADMIN`
+ * — so the caller's own id is required, not optional.
+ */
 export const listBusinesses = async (http, auth) => auth.withUser(async (token) => {
-    const payload = await http.request({ method: 'GET', path: 'user/business', token });
-    if (Array.isArray(payload))
-        return payload;
-    return payload?.rows ?? [];
+    const userId = await auth.userId();
+    const payload = await http.request({
+        method: 'GET',
+        path: `user/profile/${userId}`,
+        token,
+    });
+    return (payload?.usersInBusiness ?? [])
+        .filter((m) => AUTHORING_ROLES.has((m.role ?? '').toUpperCase()))
+        .map((m) => ({
+        id: m.businessId ?? m.businessUserInBusiness?.id ?? '',
+        name: m.businessUserInBusiness?.name ?? '',
+        role: m.role,
+    }))
+        .filter((b) => b.id && b.name);
 });
 const names = (list) => list.map((b) => b.name).join(', ');
 export const resolveBusiness = async (http, auth, name) => {

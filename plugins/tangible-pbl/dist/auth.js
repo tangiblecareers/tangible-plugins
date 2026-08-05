@@ -9,6 +9,7 @@ export class AuthManager {
     http;
     creds;
     #user;
+    #userId;
     #business;
     #ctx;
     constructor(http, creds) {
@@ -24,7 +25,20 @@ export class AuthManager {
             body: { email: this.creds.email.trim(), password: this.creds.password },
         });
         this.#user = res.token;
+        // generateLoginResponse (backend/src/helpers/auth.helper.ts:69) returns the
+        // user id alongside the token. listBusinesses needs it to read the caller's
+        // own profile, which is the only place membership rows are exposed.
+        this.#userId = res.id;
         return res.token;
+    }
+    /** The authenticated user's own id. Logs in if that has not happened yet. */
+    async userId() {
+        if (!this.#userId)
+            await this.userToken();
+        if (!this.#userId) {
+            throw new Error('Login succeeded but returned no user id.');
+        }
+        return this.#userId;
     }
     async loginBusiness(businessId, businessName) {
         const res = await this.http.request({
@@ -48,6 +62,7 @@ export class AuthManager {
     }
     reset() {
         this.#user = undefined;
+        this.#userId = undefined;
         this.#business = undefined;
         this.#ctx = undefined;
     }
