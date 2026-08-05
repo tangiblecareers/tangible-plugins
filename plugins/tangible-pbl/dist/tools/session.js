@@ -259,6 +259,7 @@ export const registerSessionTools = (server, rt) => {
             action: 'revised',
             detail: [
                 reason ?? 'No reason given.',
+                ...describeApprovalInput(input),
                 added ? `Added contexts: ${added}` : '',
                 describeProduced(produced),
             ].filter(Boolean).join('\n'),

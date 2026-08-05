@@ -846,6 +846,108 @@ describe('pbl_revise — course log entry', () => {
     const text = await readFile(file, 'utf8');
     expect(text).toContain('No reason given.');
   });
+
+  it('unaffected by decision-line logging: neither selectSkills nor selectProblem given produces the same entry as before', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtSkills(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_revise')!({
+      sessionId: 's1',
+      step: 'context',
+      reason: 'redoing context',
+    });
+
+    const file = join(root, 'staging', 's1.md');
+    const text = await readFile(file, 'utf8');
+    // No decision line should appear at all — the entry is exactly
+    // reason + describeProduced's output, unchanged from before this fix.
+    expect(text).not.toContain('Kept skills:');
+    expect(text).not.toContain('Chose problem:');
+    expect(text).toContain('### ');
+    const detailMatch = /— revised\n([\s\S]*?)\n\n## Notes/.exec(text);
+    expect(detailMatch?.[1]).toBe('redoing context\nGenerated 0 skills, 0 AI-recommended.');
+  });
+
+  it('includes "Kept skills: ..." after the reason when revising the skills selection', async () => {
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        if (opts.path === 'auth/login') return { token: 'user' } as T;
+        if (opts.path === 'auth/business/login') return { token: 'biz', businessRole: 'ADMIN' } as T;
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1') {
+          return {
+            id: 'c1', status: 'INITIALIZING',
+            CourseSkills: [
+              { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'm1', name: 'Systems Mapping' } },
+              { id: 'cs2', isSelected: true, CoreCompetencyModel: { id: 'm2', name: 'Feedback Loops' } },
+            ],
+          } as T;
+        }
+        if (opts.method === 'PATCH' && /course-skills\//.test(opts.path)) {
+          return { id: 'c1', status: 'INITIALIZING' } as T;
+        }
+        if (opts.method === 'POST' && opts.path === 'business/courses/c1/course-problems/generate') {
+          return { id: 'c1', status: 'INITIALIZING', CourseProblems: [] } as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtSkills(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_revise')!({
+      sessionId: 's1',
+      step: 'problems',
+      reason: 'wrong skills kept last time',
+      selectSkills: ['Systems Mapping'],
+    });
+
+    const text = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(text).toContain('Kept skills: Systems Mapping');
+    // Ordering: reason first, then the decision line — the reason must not be
+    // dropped by the addition of the decision line.
+    expect(text).toContain('wrong skills kept last time\nKept skills: Systems Mapping');
+    expect(text).not.toContain('Feedback Loops');
+  });
+
+  it('includes \'Chose problem: "..."\' after the reason when revising the problem selection', async () => {
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        if (opts.path === 'auth/login') return { token: 'user' } as T;
+        if (opts.path === 'auth/business/login') return { token: 'biz', businessRole: 'ADMIN' } as T;
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1') {
+          return {
+            id: 'c1', status: 'INITIALIZING',
+            CourseProblems: [{ id: 'p1', title: 'Municipal water shortage', isSelected: false }],
+          } as T;
+        }
+        if (opts.method === 'PATCH' && /course-problems\//.test(opts.path)) {
+          return { id: 'c1', status: 'INITIALIZING' } as T;
+        }
+        if (opts.method === 'POST' && opts.path === 'business/courses/c1/content-units/generate') {
+          return [] as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtSkills(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_revise')!({
+      sessionId: 's1',
+      step: 'outline',
+      reason: 'wrong problem chosen last time',
+      selectProblem: 'Municipal water shortage',
+    });
+
+    const text = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(text).toContain('Chose problem: "Municipal water shortage"');
+    expect(text).toContain('wrong problem chosen last time\nChose problem: "Municipal water shortage"');
+    expect(text).not.toContain('p1');
+  });
 });
 
 describe('pbl_abort — closes rather than deletes', () => {
