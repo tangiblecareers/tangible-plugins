@@ -166,6 +166,62 @@ see "no UUIDs" throughout this README) and nothing creates a sub-content
 unit — there is no `sub-content-units` wrapper under `src/api/`. See
 "Current limitations" below.
 
+## Course memory
+
+Every course started with `pbl_start_course` gets a durable, human-readable
+record on disk:
+
+```
+~/.tangible-pbl-mcp/courses/<env>/<slug>.md
+```
+
+`<env>` is `staging` or `production`; `<slug>` is the course id shown by
+`pbl_status` (derived from the course title, or the first few words of the
+brief when the course has no title yet). The file is plain markdown — open
+it, read it, or search across it like any other file.
+
+Layout:
+
+```
+---
+course: "..."
+env: "staging"
+courseId: "..."
+business: "..."
+step: "skills"
+awaitingApproval: true
+status: "active"
+created: "2026-08-05T10:00:00.000Z"
+updated: "2026-08-05T10:12:00.000Z"
+---
+
+# <title>
+<env> · <business>
+
+## Brief
+<the full brief text passed to pbl_start_course>
+
+## Log
+
+### 10:12 · skills — approved
+Kept 6 of 11.
+
+## Notes
+```
+
+- The frontmatter block is rewritten on every `pbl_approve`/`pbl_revise`/
+  `pbl_abort` call — it is the only part of the file the tool fully owns.
+- `## Log` is append-only: each call adds one timestamped (UTC `HH:MM`) entry
+  recording the step, the human decision, and what the backend produced.
+  Existing entries are never edited, reordered, or removed.
+- `## Notes` is yours. The tool creates it empty and never writes to it
+  again — put anything you want below that heading and it survives every
+  future save.
+- Closing a course with `pbl_abort` marks it `closed` in the frontmatter; the
+  file, the brief, and every log entry stay on disk exactly as they were.
+  There is no delete tool — remove a record yourself with `rm` if you want it
+  gone for good.
+
 ## How a Google Drive brief gets in
 
 This server does not talk to Google — there is no Drive OAuth here and none

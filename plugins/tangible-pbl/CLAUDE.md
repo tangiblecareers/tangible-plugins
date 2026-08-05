@@ -42,11 +42,12 @@ in `test/memory.test.ts` pin this. There is no `delete`: `pbl_abort` sets
 `status: closed`, and removing a record is the user's to do with `rm`.
 
 **`pbl_publish` and `pbl_invite` write no log entry, by design.** Both live in
-`src/tools/direct.ts` and take a raw `courseId` rather than a course slug —
-there is no memory file to write the entry to. This is a decided boundary,
-not an oversight: those two are escape hatches for operating on any course,
-session or not, and `reconcile()` catches an out-of-band publish the next
-time someone runs `pbl_resume` against that course.
+`src/tools/direct.ts` and take a raw `courseId` rather than a course slug, and
+there is no reverse `courseId` → slug lookup to find the memory file that may
+well already exist for that course. This is a decided boundary, not an
+oversight: those two are escape hatches for operating on any course, session
+or not, and `reconcile()` catches an out-of-band publish the next time
+someone runs `pbl_resume` against that course.
 
 ## Backend behaviour you cannot infer from the code
 
