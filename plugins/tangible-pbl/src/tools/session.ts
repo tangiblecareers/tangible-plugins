@@ -382,7 +382,39 @@ export const registerSessionTools = (
     { sessionId: z.string() },
     async ({ sessionId }) => {
       const current = rt.current;
-      const state = await current.store.load(current.env, sessionId);
+      let state: CourseMemory;
+      try {
+        state = await current.store.load(current.env, sessionId);
+      } catch (err) {
+        // An unsafe id is a caller mistake, not a damaged file — keep the
+        // traversal guard's own error.
+        if (err instanceof Error && /Invalid course id/.test(err.message)) throw err;
+
+        // A memory whose frontmatter cannot be parsed is exactly when closing
+        // matters most: until the pointer is cleared the user cannot switch
+        // environments, and the raw parse error tells them nothing to do about
+        // it. Clear the pointer, leave the file untouched, and name both the
+        // reason and the command. Removal stays theirs — the store has no
+        // delete by design.
+        if (current.activeSessionId === sessionId) current.activeSessionId = undefined;
+        let path: string | undefined;
+        try {
+          path = current.store.pathFor(current.env, sessionId);
+        } catch {
+          path = undefined;
+        }
+        return text(
+          [
+            `Could not read the memory for "${sessionId}" — the file is left ` +
+              `exactly as it is.`,
+            `Reason: ${err instanceof Error ? err.message : String(err)}`,
+            '',
+            'The active-session pointer has been cleared, so you can switch ' +
+              'environments or start another course.',
+            ...(path ? ['To remove the unreadable file:', `  rm '${path}'`] : []),
+          ].join('\n'),
+        );
+      }
       // `status` conflates two orthogonal things — session lifecycle (active/
       // closed) and backend publication (published) — so closing must not
       // clobber a publish fact the memory already recorded. If it did,

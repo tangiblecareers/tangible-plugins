@@ -22,7 +22,23 @@ export const serializeFrontmatter = (m) => {
     ];
     if (m.sourceUrl)
         pairs.push(['sourceUrl', m.sourceUrl]);
-    return ['---', ...pairs.map(([k, v]) => `${k}: ${JSON.stringify(v)}`), '---'].join('\n');
+    return [
+        '---',
+        ...pairs.map(([k, v]) => {
+            // JSON.stringify(undefined) returns undefined — the value, not a string —
+            // so interpolating it emits a bare `undefined`, which parseFrontmatter can
+            // never read back. A single missing field would brick the file
+            // permanently, and the read failure also blocks pbl_abort from cleaning
+            // it up. Refuse at the boundary: nothing reaches disk. Null is left alone
+            // — JSON.stringify(null) is "null", which round-trips fine.
+            if (v === undefined) {
+                throw new Error(`Refusing to write course memory: "${k}" is undefined. Writing it ` +
+                    `would produce a file that can never be read back.`);
+            }
+            return `${k}: ${JSON.stringify(v)}`;
+        }),
+        '---',
+    ].join('\n');
 };
 const FRONT_RE = /^---\n([\s\S]*?)\n---/;
 const PAIR_RE = /^([A-Za-z][A-Za-z0-9_]*): (.*)$/;
@@ -176,6 +192,14 @@ export class CourseMemoryStore {
     }
     #file(env, id) {
         return join(this.#dir(env), `${assertSafeId(id)}.md`);
+    }
+    /**
+     * Absolute path of a course's file. Exposed so a caller that cannot read a
+     * memory can still tell the operator exactly which file to remove — removal
+     * itself stays theirs to do, there is deliberately no delete here.
+     */
+    pathFor(env, id) {
+        return this.#file(env, id);
     }
     async save(m, entry) {
         const file = this.#file(m.env, m.id);

@@ -79,6 +79,14 @@ debugging. Do not re-derive them by guessing.
 7. Auth is two-step: `POST /auth/login` (email+password → personal JWT), then
    `POST /auth/business/login` (businessId + that Bearer → business-scoped JWT).
    Every `business/*` route needs the second token.
+8. **Responses are wrapped in a `payload` envelope**, and `http.ts` unwraps it
+   for every call. This assumption had never been tested against a real
+   response: the first staging run created a course whose `payload` was truthy
+   but carried no `id`, so `courseId` came back `undefined`. `request()` now
+   throws when a body has no `payload` key, naming the keys it did have. **The
+   actual shape of the `POST business/courses` response is still unconfirmed** —
+   `scripts/probe-create-shape.mjs` prints it in one run against staging. Until
+   someone runs it, `pbl_start_course` cannot complete against a live backend.
 
 ## Working here
 
@@ -87,7 +95,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 161 tests
+npm test          # vitest run, 186 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -151,8 +159,10 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## Never verified against a real backend
 
-**No part of this has run against a live Tangible instance.** All 161 tests use
-mocked HTTP. The README's "Before you trust it" checklist is the smoke test,
+**Nearly none of this has run against a live Tangible instance.** All 186 tests
+use mocked HTTP. A first staging run reached course creation and found that
+`POST business/courses` does not return the course id where the client expects
+it — see item 8 below. The README's "Before you trust it" checklist is the smoke test,
 and it needs staging credentials that did not exist when this was built.
 
 Until someone walks a real brief through to the outline gate, treat the

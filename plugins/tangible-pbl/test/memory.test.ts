@@ -358,3 +358,54 @@ describe('CourseMemoryStore', () => {
     ]);
   });
 });
+
+/**
+ * Regression: a live staging run wrote `courseId: undefined` into the
+ * frontmatter and permanently bricked the file — every subsequent read threw
+ * `value for "courseId" is not valid JSON — got "undefined"`, including the
+ * pbl_abort that would have cleaned it up.
+ *
+ * Mechanism: JSON.stringify(undefined) returns undefined (the value, not a
+ * string), so `${k}: ${JSON.stringify(v)}` interpolated the bare text
+ * `undefined`. Every fixture in this file had all fields defined, so no test
+ * could reach the failure path.
+ */
+describe('serializeFrontmatter — refuses to write an unreadable file', () => {
+  const REQUIRED: [keyof CourseMemory, string][] = [
+    ['title', 'course'],
+    ['env', 'env'],
+    ['courseId', 'courseId'],
+    ['businessName', 'business'],
+    ['step', 'step'],
+    ['status', 'status'],
+    ['created', 'created'],
+    ['updated', 'updated'],
+  ];
+
+  it.each(REQUIRED)('throws naming the frontmatter key when %s is undefined', (field, key) => {
+    const broken = { ...memory(), [field]: undefined } as unknown as CourseMemory;
+    expect(() => serializeFrontmatter(broken)).toThrow(new RegExp(`"${key}"`));
+  });
+
+  it('checks for undefined, not falsiness — awaitingApproval: false still writes', () => {
+    // A `if (!v) throw` guard would reject false and empty strings. Both are
+    // legitimate values that must round-trip.
+    const text = serializeFrontmatter(memory({ awaitingApproval: false, title: '' }));
+    expect(text).toContain('awaitingApproval: false');
+    expect(text).toContain('course: ""');
+  });
+
+  it('leaves nothing on disk when save refuses', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pbl-undef-'));
+    const store = new CourseMemoryStore(root);
+    const broken = { ...memory(), courseId: undefined } as unknown as CourseMemory;
+
+    await expect(store.save(broken)).rejects.toThrow(/"courseId"/);
+
+    // The point of the guard: a bad memory must never reach the filesystem, so
+    // there is no bricked file and no stray .tmp to clean up afterwards.
+    const names = await readdir(join(root, 'staging')).catch(() => []);
+    expect(names).toEqual([]);
+    await rm(root, { recursive: true, force: true });
+  });
+});

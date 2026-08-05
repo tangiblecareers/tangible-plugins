@@ -49,6 +49,12 @@ export declare class CourseMemoryStore {
     private readonly root;
     private readonly now;
     constructor(root?: string, now?: () => Date);
+    /**
+     * Absolute path of a course's file. Exposed so a caller that cannot read a
+     * memory can still tell the operator exactly which file to remove — removal
+     * itself stays theirs to do, there is deliberately no delete here.
+     */
+    pathFor(env: Env, id: string): string;
     save(m: CourseMemory, entry?: LogEntry): Promise<void>;
     load(env: Env, id: string): Promise<CourseMemory>;
     list(env: Env): Promise<CourseMemory[]>;
