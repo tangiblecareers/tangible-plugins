@@ -49,6 +49,18 @@ export const reconcile = (
     });
   }
 
+  // Archival is a fact about the course, not something the memory's own
+  // status field mirrors — reporting it here, rather than folding it into
+  // CourseStatusLabel, is what keeps this a report-don't-fix comparison.
+  if (course.status === 'ARCHIVED') {
+    out.push({
+      what: 'archived',
+      detail:
+        'The course has been archived in the web app. It cannot be authored ' +
+        'against any further — start a new course if the work needs to continue.',
+    });
+  }
+
   return out;
 };
 

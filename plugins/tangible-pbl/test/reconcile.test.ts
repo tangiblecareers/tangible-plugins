@@ -41,10 +41,61 @@ describe('reconcile', () => {
     expect(d.map((x) => x.what)).toContain('published');
   });
 
-  it('never puts the courseId in a difference', () => {
-    const m = memory({ courseId: '8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a' });
-    const c = course({ id: '8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a', title: 'Renamed', status: 'PUBLISHED' });
-    for (const d of reconcile(m, c, units(3))) {
+  it('reports that the course was archived in the web app', () => {
+    const d = reconcile(memory(), course({ status: 'ARCHIVED' }), []);
+    expect(d.map((x) => x.what)).toContain('archived');
+    expect(d.find((x) => x.what === 'archived')!.detail).toMatch(/archived/i);
+  });
+
+  // One fixture per branch that can push a Difference, each carrying the same
+  // UUID in both courseId and course.id. A branch whose guard never evaluates
+  // true here would let a future id-leaking regression in that branch through
+  // unnoticed, so `diffs.length` is asserted first to prove the branch fired
+  // before checking what it produced.
+  const UUID = '8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a';
+  const idLeakCases: Array<[string, () => ReturnType<typeof reconcile>]> = [
+    [
+      'title',
+      () =>
+        reconcile(
+          memory({ courseId: UUID }),
+          course({ id: UUID, title: 'Renamed' }),
+          [],
+        ),
+    ],
+    [
+      'course status',
+      () =>
+        reconcile(
+          memory({ courseId: UUID, step: 'skills' }),
+          course({ id: UUID, status: 'DRAFT' }),
+          units(3),
+        ),
+    ],
+    [
+      'published',
+      () =>
+        reconcile(
+          memory({ courseId: UUID, status: 'active' }),
+          course({ id: UUID, status: 'PUBLISHED' }),
+          units(3),
+        ),
+    ],
+    [
+      'archived',
+      () =>
+        reconcile(
+          memory({ courseId: UUID }),
+          course({ id: UUID, status: 'ARCHIVED' }),
+          [],
+        ),
+    ],
+  ];
+
+  it.each(idLeakCases)('never puts the courseId in a difference (%s branch)', (_label, run) => {
+    const diffs = run();
+    expect(diffs.length).toBeGreaterThan(0);
+    for (const d of diffs) {
       expect(`${d.what} ${d.detail}`).not.toContain('8f14e45f');
     }
   });
