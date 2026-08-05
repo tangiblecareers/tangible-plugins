@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  serializeFrontmatter, parseFrontmatter, splitDocument,
+  serializeFrontmatter, parseFrontmatter, splitDocument, slugify,
   type CourseMemory,
 } from '../src/session/memory.js';
 
@@ -68,5 +68,30 @@ describe('frontmatter codec', () => {
     );
     expect(front.course).toBe('Intro to Systems Thinking');
     expect(out).toBe(body);
+  });
+});
+
+describe('slugify', () => {
+  it('kebab-cases a title', () => {
+    expect(slugify('Intro to Systems Thinking', 'ignored')).toBe('intro-to-systems-thinking');
+  });
+
+  it('strips punctuation and collapses separators', () => {
+    expect(slugify('A: B — "C"  D!', 'ignored')).toBe('a-b-c-d');
+  });
+
+  it('falls back to the first five words of the brief when there is no title', () => {
+    expect(slugify(undefined, 'Design a course on urban water systems for students'))
+      .toBe('design-a-course-on-urban');
+  });
+
+  it('falls back when the title kebab-cases to nothing', () => {
+    expect(slugify('!!! ???', 'Water systems for cities')).toBe('water-systems-for-cities');
+  });
+
+  it('always produces something assertSafeId accepts', () => {
+    for (const t of ['系统 思考', '   ', '../../etc/passwd', 'Ünïcodé Cøursé']) {
+      expect(slugify(t, 'fallback brief text here')).toMatch(/^[A-Za-z0-9_-]+$/);
+    }
   });
 });
