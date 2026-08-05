@@ -187,6 +187,44 @@ describe('CourseMemoryStore', () => {
     expect(ids).toEqual(['intro-to-systems-thinking']);
   });
 
+  it('rejects load when the frontmatter "step" value is not a real step', async () => {
+    await store.save(memory());
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const corrupted = (await readFile(file, 'utf8')).replace(
+      'step: "context"', 'step: "not-a-real-step"',
+    );
+    await writeFile(file, corrupted, 'utf8');
+    await expect(store.load('staging', 'intro-to-systems-thinking')).rejects.toThrow(
+      /invalid "step".*not-a-real-step/s,
+    );
+  });
+
+  it('rejects load when the frontmatter "step" line is deleted entirely', async () => {
+    await store.save(memory());
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const corrupted = (await readFile(file, 'utf8'))
+      .split('\n')
+      .filter((l) => !l.startsWith('step:'))
+      .join('\n');
+    await writeFile(file, corrupted, 'utf8');
+    await expect(store.load('staging', 'intro-to-systems-thinking')).rejects.toThrow(
+      /invalid "step"/,
+    );
+  });
+
+  it('skips a file with a bogus "step" value in list() rather than throwing', async () => {
+    await store.save(memory());
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const corrupted = (await readFile(file, 'utf8')).replace(
+      'step: "context"', 'step: "not-a-real-step"',
+    );
+    await writeFile(file, corrupted, 'utf8');
+    await store.save(memory({ id: 'second' }));
+
+    const ids = (await store.list('staging')).map((m) => m.id);
+    expect(ids).toEqual(['second']);
+  });
+
   it('rejects path traversal with absolute paths', async () => {
     await expect(store.load('staging', '../../etc/passwd')).rejects.toThrow(
       /Invalid course id/,
@@ -214,6 +252,32 @@ describe('CourseMemoryStore', () => {
     );
     expect(text).toContain('### 10:12 · skills — approved\nKept 6 of 11.');
     expect(text.indexOf('### 10:12')).toBeLessThan(text.indexOf('## Notes'));
+  });
+
+  it('anchors the inserted entry on the real (last) "## Notes" heading, even when the brief itself contains one', async () => {
+    // pbl_start_course's own description tells the user to paste the full
+    // source document as the brief, so a source doc containing a "## Notes"
+    // heading is realistic. The real "## Notes" heading (written by
+    // freshBody) is always the LAST one in the document — insertEntry must
+    // anchor there, not on the brief's embedded one, or the entry lands
+    // inside the Brief section and the real Log section stays empty.
+    const brief = 'Some brief text.\n\n## Notes\nThis line is part of the brief, not the real Notes section.';
+    await store.save(memory({ brief }));
+    await store.save(memory({ brief }), entry());
+
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const text = await readFile(file, 'utf8');
+
+    const logHeadingIdx = text.indexOf('## Log');
+    const entryIdx = text.indexOf('### 10:12 · skills — approved');
+    const lastNotesIdx = text.lastIndexOf('## Notes');
+
+    expect(logHeadingIdx).toBeGreaterThanOrEqual(0);
+    expect(entryIdx).toBeGreaterThan(logHeadingIdx);
+    expect(entryIdx).toBeLessThan(lastNotesIdx);
+
+    // The brief itself must come back unchanged — not the brief plus the log.
+    expect((await store.load('staging', 'intro-to-systems-thinking')).brief).toBe(brief);
   });
 
   it('preserves hand-written Notes text and earlier entries byte-for-byte', async () => {

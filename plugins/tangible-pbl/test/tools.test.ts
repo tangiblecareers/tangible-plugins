@@ -507,6 +507,18 @@ describe('pbl_start_course — context selection', () => {
 
     expect(calls.some((c) => /course-contexts/.test(c.path))).toBe(false);
   });
+
+  it('writes zero log entries — "reads never write" starts from a clean record', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_start_course')!({ brief: 'Teach incident response' });
+
+    const text = await readFile(join(root, 'staging', 'teach-incident-response.md'), 'utf8');
+    const entryCount = (text.match(/^### \d{2}:\d{2} · /gm) ?? []).length;
+    expect(entryCount).toBe(0);
+  });
 });
 
 describe('pbl_approve — progress notifications', () => {
@@ -783,6 +795,67 @@ describe('pbl_approve — publish gate sets status', () => {
     const memory = await rtHolder.current.store.load('staging', 's1');
     const differences = reconcile(memory, { id: 'c1', status: 'PUBLISHED' }, []);
     expect(differences.find((d) => d.what === 'published')).toBeUndefined();
+  });
+
+  it('keeps status "published" through a subsequent pbl_abort, so reconcile does not falsely warn it was never published', async () => {
+    const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
+    await seedAtDetail(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' }); // publish gate
+    await handlers.get('pbl_abort')!({ sessionId: 's1' });
+
+    const reloaded = await rtHolder.current.store.load('staging', 's1');
+    expect(reloaded.status).toBe('published');
+
+    // The load-bearing assertion: a test checking only the field above would
+    // pass even if pbl_abort's fix and reconcile's check disagreed on what
+    // "published" means — feeding the reloaded memory back into reconcile
+    // against a PUBLISHED course is what actually proves the false warning
+    // from the bug report is gone.
+    const differences = reconcile(reloaded, { id: 'c1', status: 'PUBLISHED' }, []);
+    expect(differences.find((d) => d.what === 'published')).toBeUndefined();
+  });
+});
+
+describe('pbl_approve — reopens a course closed with pbl_abort', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-approve-reopen-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedClosed = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a course',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'context',
+      awaitingApproval: true,
+      status: 'closed',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('flips status back to "active" when approving after resuming a closed course', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedClosed(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' });
+
+    const reloaded = await rtHolder.current.store.load('staging', 's1');
+    expect(reloaded.status).toBe('active');
   });
 });
 
@@ -1069,7 +1142,7 @@ describe('pbl_resume', () => {
   };
 
   it('reopens by slug, re-resolves the business, and reports differences without mutating the file', async () => {
-    const { http } = buildResumeHttp();
+    const { http, calls } = buildResumeHttp();
     const rtHolder = { current: await makeRuntime(http, root) };
     await seed(rtHolder.current.store);
     const before = await readFile(join(root, 'staging', 's1.md'), 'utf8');
@@ -1082,6 +1155,13 @@ describe('pbl_resume', () => {
     // should surface that as a difference.
     expect(result.content[0].text).toContain('frozen');
     expect(rtHolder.current.activeSessionId).toBe('s1');
+
+    // The business really is re-resolved by name — not just trusted from the
+    // memory file. A stub that mapped resolveBusiness's input straight back
+    // to itself as an id would leave every other assertion here green, so
+    // this checks resolveBusiness's own listBusinesses call actually fired.
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    expect(paths).toContain('GET user/profile/u1');
 
     // pbl_resume must never advance or otherwise write to the file.
     const after = await readFile(join(root, 'staging', 's1.md'), 'utf8');

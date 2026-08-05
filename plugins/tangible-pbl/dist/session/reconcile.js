@@ -31,6 +31,17 @@ export const reconcile = (m, course, units) => {
             detail: 'The course is PUBLISHED, but this memory was never marked published.',
         });
     }
+    // pbl_resume never un-closes a course itself — only an approve after
+    // resuming does (see pbl_approve) — so a resume against a closed memory
+    // should say so, in the same report-don't-fix style as every other
+    // difference here, rather than silently letting the human keep working
+    // against a course pbl_status still lists as closed.
+    if (m.status === 'closed') {
+        out.push({
+            what: 'closed',
+            detail: 'This memory was closed with pbl_abort. Approving a step will reopen it.',
+        });
+    }
     // Archival is a fact about the course, not something the memory's own
     // status field mirrors — reporting it here, rather than folding it into
     // CourseStatusLabel, is what keeps this a report-don't-fix comparison.

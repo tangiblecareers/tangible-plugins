@@ -125,6 +125,37 @@ const assertSafeId = (id: string): string => {
   return id;
 };
 
+// Kept as literal arrays here — alongside the Step and CourseStatusLabel
+// definitions they enumerate — rather than importing STEP_ORDER from
+// machine.ts, which would make memory.ts depend on the module that already
+// depends on memory.ts for these very types. Keep in sync with machine.ts's
+// STEP_ORDER by hand if a step is ever added or renamed.
+const STEPS: readonly Step[] = [
+  'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+];
+const STATUS_LABELS: readonly CourseStatusLabel[] = ['active', 'closed', 'published'];
+
+/**
+ * A hand-edited or corrupted `step`/`status` value is not a parse failure in
+ * the JSON sense — `JSON.parse('"bogus"')` succeeds — so it would otherwise
+ * flow through as an unchecked cast. `front.step as Step` on a dropped or
+ * renamed key silently yields `undefined`, `STEP_ORDER.indexOf(undefined)` is
+ * `-1`, and `nextStep` returns `'done'` — a hand-edit would silently persist
+ * `step: "done"` on the next pbl_approve, real state loss in a feature whose
+ * whole point is durability. Validating here, at load time, turns that into a
+ * loud failure naming the offending key and value instead.
+ */
+const assertOneOf = <T extends string>(
+  value: unknown, valid: readonly T[], key: string, file: string,
+): T => {
+  if (typeof value === 'string' && (valid as readonly string[]).includes(value)) {
+    return value as T;
+  }
+  throw new Error(
+    `${file}: invalid "${key}" — expected one of ${valid.join(', ')}, got ${JSON.stringify(value)}`,
+  );
+};
+
 const NOTES = '## Notes';
 
 // The document's headings always appear in this fixed order (see freshBody).
@@ -177,9 +208,17 @@ const freshBody = (m: CourseMemory): string =>
  * order and hand-written notes stay at the bottom. Everything outside the
  * inserted block passes through verbatim — a revise appends a second entry
  * rather than rewriting the first, which is what "why did this change" needs.
+ *
+ * Anchors on the LAST "## Notes", not the first: pbl_start_course's own
+ * description tells the user to paste the full source document as the brief,
+ * so a brief that itself contains a "## Notes" heading is realistic. The
+ * tool always writes the real "## Notes" heading last (see freshBody), so
+ * indexOf would find a brief's heading first and insert the entry inside the
+ * Brief section, leaving the real Log section empty. lastIndexOf always finds
+ * the real one regardless of what the brief contains.
  */
 const insertEntry = (body: string, rendered: string): string => {
-  const at = body.indexOf(NOTES);
+  const at = body.lastIndexOf(NOTES);
   if (at === -1) return `${body.replace(/\n*$/, '')}\n\n${rendered}`;
   return `${body.slice(0, at)}${rendered}\n${body.slice(at)}`;
 };
@@ -258,9 +297,9 @@ export class CourseMemoryStore {
       businessName: String(front.business ?? ''),
       brief: section(body, 'Brief'),
       ...(front.sourceUrl ? { sourceUrl: String(front.sourceUrl) } : {}),
-      step: front.step as Step,
+      step: assertOneOf(front.step, STEPS, 'step', file),
       awaitingApproval: front.awaitingApproval === true,
-      status: front.status as CourseStatusLabel,
+      status: assertOneOf(front.status, STATUS_LABELS, 'status', file),
       created: String(front.created ?? ''),
       updated: String(front.updated ?? ''),
     };

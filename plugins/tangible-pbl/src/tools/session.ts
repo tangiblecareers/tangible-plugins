@@ -150,6 +150,10 @@ const actionFor = (produced: Produced): LogEntry['action'] => {
  * actually passed — never resolved to an id, never the full candidate list.
  */
 const describeApprovalInput = (input: ApproveInput): string[] => {
+  // `[]`/`''` are treated as absent here on purpose — that mirrors advance()'s
+  // own `input.selectSkills?.length` and `if (!input.selectProblem)` checks,
+  // so a decision line never claims a choice was made when advance() itself
+  // took the "nothing given" branch.
   const lines: string[] = [];
   if (input.selectSkills?.length) {
     lines.push(`Kept skills: ${input.selectSkills.join(', ')}`);
@@ -288,10 +292,18 @@ export const registerSessionTools = (
         input,
       );
       // advance()'s done() spreads the previous state, so status never moves
-      // off 'active' on its own — the publish gate is the one place a human
-      // decision changes it, and reconcile() depends on this being set so a
-      // later pbl_resume doesn't misreport an in-band publish as a surprise.
-      const advanced = produced.kind === 'published' ? { ...next, status: 'published' as const } : next;
+      // on its own. Two decisions live here: the publish gate marks the
+      // memory published so reconcile() doesn't misreport an in-band publish
+      // as a surprise on a later pbl_resume; and approving after resuming a
+      // closed course (pbl_resume never un-closes one itself) un-closes it —
+      // an approved advance is itself evidence the course is active again.
+      const advanced: CourseMemory = {
+        ...next,
+        status:
+          produced.kind === 'published' ? 'published'
+          : next.status === 'closed' ? 'active'
+          : next.status,
+      };
       const entry: LogEntry = {
         step: advanced.step,
         action: actionFor(produced),
@@ -371,11 +383,22 @@ export const registerSessionTools = (
     async ({ sessionId }) => {
       const current = rt.current;
       const state = await current.store.load(current.env, sessionId);
-      await current.store.save({ ...state, status: 'closed' }, {
-        step: state.step,
-        action: 'closed',
-        detail: 'Session closed. The course was not deleted.',
-      });
+      // `status` conflates two orthogonal things — session lifecycle (active/
+      // closed) and backend publication (published) — so closing must not
+      // clobber a publish fact the memory already recorded. If it did,
+      // reconcile() would see status !== 'published' against a PUBLISHED
+      // backend and print a false "never marked published" warning on the
+      // next pbl_resume. The `closed` log entry below still records that the
+      // session itself was closed. Re-modeling status into two fields is a
+      // spec change, tracked separately — this ternary is the interim fix.
+      await current.store.save(
+        { ...state, status: state.status === 'published' ? 'published' : 'closed' },
+        {
+          step: state.step,
+          action: 'closed',
+          detail: 'Session closed. The course was not deleted.',
+        },
+      );
       if (current.activeSessionId === sessionId) current.activeSessionId = undefined;
       return text(
         `Closed "${state.title}". The course was not deleted, and the record stays ` +
