@@ -41,6 +41,12 @@ describe('reconcile', () => {
     expect(d.map((x) => x.what)).toContain('published');
   });
 
+  it('reports that the memory was closed', () => {
+    const d = reconcile(memory({ status: 'closed' }), course(), []);
+    expect(d.map((x) => x.what)).toContain('closed');
+    expect(d.find((x) => x.what === 'closed')!.detail).toMatch(/closed/i);
+  });
+
   it('reports that the course was archived in the web app', () => {
     const d = reconcile(memory(), course({ status: 'ARCHIVED' }), []);
     expect(d.map((x) => x.what)).toContain('archived');
