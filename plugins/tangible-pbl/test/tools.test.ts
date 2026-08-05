@@ -7,6 +7,7 @@ import { createRuntime, switchEnvironment, type Runtime } from '../src/server.js
 import { loadConfig } from '../src/config.js';
 import { AuthManager } from '../src/auth.js';
 import { CourseMemoryStore, type CourseMemory } from '../src/session/memory.js';
+import { reconcile } from '../src/session/reconcile.js';
 import { registerSessionTools } from '../src/tools/session.js';
 import type { HttpClient, RequestOpts } from '../src/http.js';
 
@@ -610,6 +611,178 @@ describe('pbl_approve — course log entry', () => {
     const entryCount = (text.match(/^### \d{2}:\d{2} · /gm) ?? []).length;
     expect(entryCount).toBe(1);
     expect(text).toMatch(/### \d{2}:\d{2} · skills — approved/);
+  });
+});
+
+describe('pbl_approve — records the human decision, not just the generation output', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-approve-decision-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAt = async (store: CourseMemoryStore, step: CourseMemory['step']): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a course',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step,
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('logs "Kept skills: ..." from the human-supplied selectSkills, not the AI recommendation', async () => {
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        if (opts.path === 'auth/login') return { token: 'user' } as T;
+        if (opts.path === 'auth/business/login') return { token: 'biz', businessRole: 'ADMIN' } as T;
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1') {
+          return {
+            id: 'c1', status: 'INITIALIZING',
+            CourseSkills: [
+              { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'm1', name: 'Systems Mapping' } },
+              { id: 'cs2', isSelected: true, CoreCompetencyModel: { id: 'm2', name: 'Feedback Loops' } },
+            ],
+          } as T;
+        }
+        if (opts.method === 'PATCH' && /course-skills\//.test(opts.path)) {
+          return { id: 'c1', status: 'INITIALIZING' } as T;
+        }
+        if (opts.method === 'POST' && opts.path === 'business/courses/c1/course-problems/generate') {
+          return { id: 'c1', status: 'INITIALIZING', CourseProblems: [] } as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAt(rtHolder.current.store, 'skills');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1', selectSkills: ['Systems Mapping'] });
+
+    const text = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(text).toContain('Kept skills: Systems Mapping');
+    // The line must come from the human's input, not the AI's isSelected flag
+    // — both fixture skills are isSelected: true, but only one was requested.
+    expect(text).not.toContain('Feedback Loops');
+  });
+
+  it('logs "Chose problem: ..." using the exact string the human passed, never an id', async () => {
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        if (opts.path === 'auth/login') return { token: 'user' } as T;
+        if (opts.path === 'auth/business/login') return { token: 'biz', businessRole: 'ADMIN' } as T;
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1') {
+          return {
+            id: 'c1', status: 'INITIALIZING',
+            CourseProblems: [{ id: 'p1', title: 'Municipal water shortage', isSelected: false }],
+          } as T;
+        }
+        if (opts.method === 'PATCH' && /course-problems\//.test(opts.path)) {
+          return { id: 'c1', status: 'INITIALIZING' } as T;
+        }
+        if (opts.method === 'POST' && opts.path === 'business/courses/c1/content-units/generate') {
+          return [] as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAt(rtHolder.current.store, 'problems');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1', selectProblem: 'Municipal water shortage' });
+
+    const text = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(text).toContain('Chose problem: "Municipal water shortage"');
+    expect(text).not.toContain('p1');
+  });
+
+  it('logs neither decision line when approving a gate with no selection input', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAt(rtHolder.current.store, 'context');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' });
+
+    const text = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(text).not.toContain('Kept skills:');
+    expect(text).not.toContain('Chose problem:');
+  });
+});
+
+describe('pbl_approve — publish gate sets status', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-approve-publish-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAtDetail = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a course',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'detail',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  const buildPublishHttp = (): HttpClient => ({
+    async request<T>(opts: RequestOpts): Promise<T> {
+      if (opts.path === 'auth/login') return { token: 'user' } as T;
+      if (opts.path === 'auth/business/login') return { token: 'biz', businessRole: 'ADMIN' } as T;
+      if (opts.method === 'PATCH' && opts.path === 'business/courses/c1/publish') {
+        return { id: 'c1', status: 'PUBLISHED' } as T;
+      }
+      throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+    },
+  });
+
+  it('persists status: "published" on the memory once the publish gate is approved', async () => {
+    const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
+    await seedAtDetail(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' });
+
+    const reloaded = await rtHolder.current.store.load('staging', 's1');
+    expect(reloaded.status).toBe('published');
+  });
+
+  it('the persisted memory no longer trips reconcile\'s "never marked published" warning', async () => {
+    const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
+    await seedAtDetail(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' });
+
+    const memory = await rtHolder.current.store.load('staging', 's1');
+    const differences = reconcile(memory, { id: 'c1', status: 'PUBLISHED' }, []);
+    expect(differences.find((d) => d.what === 'published')).toBeUndefined();
   });
 });
 

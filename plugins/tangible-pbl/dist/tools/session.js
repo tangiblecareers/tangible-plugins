@@ -60,13 +60,20 @@ const depsFor = (rt, onProgress) => ({
     invite: (id, emails) => sendInvitations(rt.http, rt.auth, id, emails),
     onProgress,
 });
-/** One line per gate, recording what was chosen — never the full candidate list. */
+/**
+ * One line per gate, recording what the backend produced — never the full
+ * candidate list. This describes generation output, not a human decision: the
+ * 'skills' case in particular runs immediately after generateSkills(), before
+ * any human has touched the selection, so it must not claim anything was
+ * "kept" — that claim belongs in the caller's decision line (see
+ * describeApprovalInput below), built from the *next* call's selectSkills
+ * input, not from this one.
+ */
 const describeProduced = (produced) => {
     switch (produced.kind) {
         case 'skills': {
-            const kept = produced.skills.filter((s) => s.isSelected);
-            return `Kept ${kept.length} of ${produced.skills.length} skills: ` +
-                `${kept.map((s) => s.CoreCompetencyModel.name).join(', ') || '(none)'}`;
+            const recommended = produced.skills.filter((s) => s.isSelected).length;
+            return `Generated ${produced.skills.length} skills, ${recommended} AI-recommended.`;
         }
         case 'problems':
             return `Generated ${produced.problems.length} problem scenarios.`;
@@ -86,13 +93,37 @@ const describeProduced = (produced) => {
  * decision was to publish or to invite learners — LogEntry's action enum
  * exists to capture exactly that distinction, so it is derived here rather
  * than hardcoded to 'approved' regardless of what the gate actually did.
+ * Written as an exhaustive switch (no default) so a seventh Produced variant
+ * is a compile error here, the same safety describeProduced already has.
  */
 const actionFor = (produced) => {
-    if (produced.kind === 'published')
-        return 'published';
-    if (produced.kind === 'invited')
-        return 'invited';
-    return 'approved';
+    switch (produced.kind) {
+        case 'published': return 'published';
+        case 'invited': return 'invited';
+        case 'skills':
+        case 'problems':
+        case 'outline':
+        case 'none':
+            return 'approved';
+    }
+};
+/**
+ * The human decision behind a pbl_approve call, derived from the *input* that
+ * was passed in — not from what the backend produced. selectSkills/selectProblem
+ * choose from the *previous* gate's candidates (e.g. selectSkills is passed
+ * while advancing skills -> problems, to say which already-generated skills to
+ * keep), so this must read `input`, not `produced`. Logs the strings the human
+ * actually passed — never resolved to an id, never the full candidate list.
+ */
+const describeApprovalInput = (input) => {
+    const lines = [];
+    if (input.selectSkills?.length) {
+        lines.push(`Kept skills: ${input.selectSkills.join(', ')}`);
+    }
+    if (input.selectProblem) {
+        lines.push(`Chose problem: "${input.selectProblem}"`);
+    }
+    return lines;
 };
 export const registerSessionTools = (server, rt) => {
     server.tool('pbl_start_course', 'Create a course from a brief and stop at the first gate. Pass the full text of the source document as `brief`.', {
@@ -122,7 +153,7 @@ export const registerSessionTools = (server, rt) => {
         const id = await current.store.allocateSlug(current.env, course.title, brief);
         const state = {
             id,
-            title: course.title ?? brief.trim().split(/\s+/).slice(0, 8).join(' '),
+            title: course.title || brief.trim().split(/\s+/).slice(0, 8).join(' '),
             env: current.env,
             courseId: course.id,
             businessName: ctx.businessName,
@@ -139,7 +170,7 @@ export const registerSessionTools = (server, rt) => {
         return text(`Session ${state.id}\n` +
             renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }));
     });
-    server.tool('pbl_status', 'Show a session’s progress, or list open sessions in this environment.', { sessionId: z.string().optional() }, async ({ sessionId }) => {
+    server.tool('pbl_status', 'Show a course’s progress, or list every course — open and closed — in this environment.', { sessionId: z.string().optional() }, async ({ sessionId }) => {
         const current = rt.current;
         if (!sessionId) {
             const all = await current.store.list(current.env);
@@ -175,13 +206,18 @@ export const registerSessionTools = (server, rt) => {
         const state = await current.store.load(current.env, sessionId);
         const onProgress = makeOnProgress(extra);
         const { state: next, produced } = await advance(depsFor(current, onProgress), state, input);
+        // advance()'s done() spreads the previous state, so status never moves
+        // off 'active' on its own — the publish gate is the one place a human
+        // decision changes it, and reconcile() depends on this being set so a
+        // later pbl_resume doesn't misreport an in-band publish as a surprise.
+        const advanced = produced.kind === 'published' ? { ...next, status: 'published' } : next;
         const entry = {
-            step: next.step,
+            step: advanced.step,
             action: actionFor(produced),
-            detail: describeProduced(produced),
+            detail: [...describeApprovalInput(input), describeProduced(produced)].join('\n'),
         };
-        await current.store.save(next, entry);
-        return text(renderGate(next, { appUrl: current.appUrl, produced }));
+        await current.store.save(advanced, entry);
+        return text(renderGate(advanced, { appUrl: current.appUrl, produced }));
     });
     server.tool('pbl_revise', 'Redo a step with changes — pass `contexts` to add new context items when step is ' +
         '"context". Context, skills and problems are frozen once the outline exists.', {
