@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { AuthManager } from './auth.js';
 import { configFor, type Config, type Env } from './config.js';
 import { createHttpClient, type HttpClient } from './http.js';
-import { SessionStore } from './session/store.js';
+import { CourseMemoryStore } from './session/memory.js';
 import { registerContextTools } from './tools/context.js';
 import { registerSessionTools } from './tools/session.js';
 import { registerDirectTools } from './tools/direct.js';
@@ -14,7 +14,7 @@ export interface Runtime {
   appUrl: string;
   http: HttpClient;
   auth: AuthManager;
-  store: SessionStore;
+  store: CourseMemoryStore;
   activeSessionId?: string;
 }
 
@@ -28,7 +28,7 @@ export const createRuntime = (cfg: Config, env: Env = cfg.active): Runtime => {
     appUrl: ec.appUrl,
     http,
     auth: new AuthManager(http, { email: ec.email, password: ec.password }),
-    store: new SessionStore(),
+    store: new CourseMemoryStore(),
   };
 };
 

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { advance, assertRevisable, nextStep, STEP_ORDER } from '../src/session/machine.js';
-import type { SessionState } from '../src/session/store.js';
+import type { CourseMemory } from '../src/session/memory.js';
 
-const state = (over: Partial<SessionState> = {}): SessionState => ({
-  id: 's1', env: 'staging', courseId: 'c1', businessId: 'b1',
+const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
+  id: 's1', title: 'Intro', env: 'staging', courseId: 'c1',
   businessName: 'Acme', brief: 'brief', step: 'context',
-  awaitingApproval: true, history: [], ...over,
+  awaitingApproval: true, status: 'active',
+  created: '2026-08-05T10:00:00.000Z', updated: '2026-08-05T10:00:00.000Z', ...over,
 });
 
 const SKILLS = [
@@ -162,10 +163,6 @@ describe('advance produces reviewable output', () => {
     expect(s.step).toBe('invite');
   });
 
-  it('records each completed step in history', async () => {
-    const { state: s } = await advance(deps(), state({ step: 'context' }));
-    expect(s.history).toEqual(['skills']);
-  });
 });
 
 describe('assertRevisable', () => {

@@ -1,13 +1,13 @@
 import type { Produced } from './machine.js';
 import { STEP_ORDER, nextStep } from './machine.js';
-import type { SessionState } from './store.js';
+import type { CourseMemory } from './memory.js';
 
 const VISIBLE = STEP_ORDER.filter((s) => s !== 'done');
 
 export const courseUrl = (appUrl: string, courseId: string): string =>
   `${appUrl.replace(/\/+$/, '')}/business/problem-based-learning/courses/${courseId}`;
 
-export const renderLedger = (state: SessionState): string => {
+export const renderLedger = (state: CourseMemory): string => {
   const at = STEP_ORDER.indexOf(state.step);
   return VISIBLE.map((s, i) => `${i <= at ? '✓' : '○'} ${s}`).join(' · ');
 };
@@ -41,7 +41,7 @@ const renderProduced = (produced: Produced): string => {
 };
 
 export const renderGate = (
-  state: SessionState,
+  state: CourseMemory,
   opts: { appUrl: string; produced: Produced },
 ): string => {
   const banner =
