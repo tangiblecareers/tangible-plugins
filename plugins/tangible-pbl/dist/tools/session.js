@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { createCourse, generateContentUnits, generateProblems, generateSkills, getCourse, selectContext, selectProblem, selectSkill, addContext, } from '../api/builder.js';
+import { createCourse, generateContentUnits, generateProblems, generateSkills, getCourse, listContentUnits, selectContext, selectProblem, selectSkill, addContext, } from '../api/builder.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
 import { advance, assertRevisable } from '../session/machine.js';
 import { renderGate, renderLedger } from '../session/ledger.js';
+import { reconcile, renderResume } from '../session/reconcile.js';
+import { resolveBusiness } from '../resolve.js';
 import { text } from './render.js';
 const makeOnProgress = (extra) => (message) => {
     const progressToken = extra?._meta?.progressToken;
@@ -59,6 +60,40 @@ const depsFor = (rt, onProgress) => ({
     invite: (id, emails) => sendInvitations(rt.http, rt.auth, id, emails),
     onProgress,
 });
+/** One line per gate, recording what was chosen — never the full candidate list. */
+const describeProduced = (produced) => {
+    switch (produced.kind) {
+        case 'skills': {
+            const kept = produced.skills.filter((s) => s.isSelected);
+            return `Kept ${kept.length} of ${produced.skills.length} skills: ` +
+                `${kept.map((s) => s.CoreCompetencyModel.name).join(', ') || '(none)'}`;
+        }
+        case 'problems':
+            return `Generated ${produced.problems.length} problem scenarios.`;
+        case 'outline':
+            return `Outline: ${produced.units.map((u) => u.title).join(', ') || '(empty)'}`;
+        case 'published':
+            return 'Course published.';
+        case 'invited':
+            return `Invited ${produced.count} learner${produced.count === 1 ? '' : 's'}.`;
+        case 'none':
+            return 'Advanced with nothing generated.';
+    }
+};
+/**
+ * The action recorded for a pbl_approve call. Most advances are just
+ * "approved", but produced.kind already tells us precisely when the human
+ * decision was to publish or to invite learners — LogEntry's action enum
+ * exists to capture exactly that distinction, so it is derived here rather
+ * than hardcoded to 'approved' regardless of what the gate actually did.
+ */
+const actionFor = (produced) => {
+    if (produced.kind === 'published')
+        return 'published';
+    if (produced.kind === 'invited')
+        return 'invited';
+    return 'approved';
+};
 export const registerSessionTools = (server, rt) => {
     server.tool('pbl_start_course', 'Create a course from a brief and stop at the first gate. Pass the full text of the source document as `brief`.', {
         brief: z.string().min(1).describe('The course brief — paste the source document text here'),
@@ -83,17 +118,21 @@ export const registerSessionTools = (server, rt) => {
         // rather than undefined — that skips applyContexts' getCourse fallback,
         // which exists for pbl_revise where the course may already have some.
         await applyContexts(current.http, current.auth, course.id, contexts ?? [], course.CourseContexts ?? []);
+        const now = new Date().toISOString();
+        const id = await current.store.allocateSlug(current.env, course.title, brief);
         const state = {
-            id: randomUUID().slice(0, 8),
+            id,
+            title: course.title ?? brief.trim().split(/\s+/).slice(0, 8).join(' '),
             env: current.env,
             courseId: course.id,
-            businessId: ctx.businessId,
             businessName: ctx.businessName,
             brief,
             sourceUrl,
             step: 'context',
             awaitingApproval: true,
-            history: ['context'],
+            status: 'active',
+            created: now,
+            updated: now,
         };
         await current.store.save(state);
         current.activeSessionId = state.id;
@@ -105,11 +144,26 @@ export const registerSessionTools = (server, rt) => {
         if (!sessionId) {
             const all = await current.store.list(current.env);
             return text(all.length === 0
-                ? `No open sessions in ${current.env}.`
-                : all.map((s) => `${s.id} · ${s.businessName} · ${renderLedger(s)}`).join('\n'));
+                ? `No courses in ${current.env}.`
+                : all
+                    .map((s) => `${s.id} · ${s.status} · ${s.businessName} · ${renderLedger(s)}`)
+                    .join('\n'));
         }
         const state = await current.store.load(current.env, sessionId);
         return text(renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }));
+    });
+    server.tool('pbl_resume', 'Reopen a course by name, re-resolve its business, and report anything that ' +
+        'changed in the web app since. Never overwrites the backend.', { course: z.string().describe('The course slug, as shown by pbl_status') }, async ({ course: slug }) => {
+        const current = rt.current;
+        const memory = await current.store.load(current.env, slug);
+        // businessId is deliberately not persisted — re-resolving by name keeps a
+        // UUID out of a file a human reads and makes the memory machine-portable.
+        const business = await resolveBusiness(current.http, current.auth, memory.businessName);
+        await current.auth.loginBusiness(business.id, business.name);
+        const course = await getCourse(current.http, current.auth, memory.courseId);
+        const units = await listContentUnits(current.http, current.auth, memory.courseId);
+        current.activeSessionId = memory.id;
+        return text(renderResume(memory, course, units, reconcile(memory, course, units)));
     });
     server.tool('pbl_approve', 'Advance the session exactly one step. This is the only way forward — nothing advances on its own.', {
         sessionId: z.string(),
@@ -121,7 +175,12 @@ export const registerSessionTools = (server, rt) => {
         const state = await current.store.load(current.env, sessionId);
         const onProgress = makeOnProgress(extra);
         const { state: next, produced } = await advance(depsFor(current, onProgress), state, input);
-        await current.store.save(next);
+        const entry = {
+            step: next.step,
+            action: actionFor(produced),
+            detail: describeProduced(produced),
+        };
+        await current.store.save(next, entry);
         return text(renderGate(next, { appUrl: current.appUrl, produced }));
     });
     server.tool('pbl_revise', 'Redo a step with changes — pass `contexts` to add new context items when step is ' +
@@ -143,7 +202,8 @@ export const registerSessionTools = (server, rt) => {
             'regenerate skills against the unchanged context.'),
         selectSkills: z.array(z.string()).optional().describe('Skill names to keep; others are deselected'),
         selectProblem: z.string().optional().describe('Problem scenario title, id, or a unique prefix of either, to select'),
-    }, async ({ sessionId, step, contexts, ...input }, extra) => {
+        reason: z.string().optional().describe('Why this step is being redone — recorded in the course log'),
+    }, async ({ sessionId, step, contexts, reason, ...input }, extra) => {
         const current = rt.current;
         const state = await current.store.load(current.env, sessionId);
         assertRevisable(state, step);
@@ -157,14 +217,29 @@ export const registerSessionTools = (server, rt) => {
             awaitingApproval: true,
         };
         const { state: next, produced } = await advance(depsFor(current, onProgress), rewound, input);
-        await current.store.save(next);
+        const added = (contexts ?? []).map((c) => `${c.category}="${c.value}"`).join('; ');
+        await current.store.save(next, {
+            step: step,
+            action: 'revised',
+            detail: [
+                reason ?? 'No reason given.',
+                added ? `Added contexts: ${added}` : '',
+                describeProduced(produced),
+            ].filter(Boolean).join('\n'),
+        });
         return text(renderGate(next, { appUrl: current.appUrl, produced }));
     });
     server.tool('pbl_abort', 'Close the session. The course is left exactly as it is.', { sessionId: z.string() }, async ({ sessionId }) => {
         const current = rt.current;
-        await current.store.delete(current.env, sessionId);
+        const state = await current.store.load(current.env, sessionId);
+        await current.store.save({ ...state, status: 'closed' }, {
+            step: state.step,
+            action: 'closed',
+            detail: 'Session closed. The course was not deleted.',
+        });
         if (current.activeSessionId === sessionId)
             current.activeSessionId = undefined;
-        return text(`Session ${sessionId} closed. The course was not deleted.`);
+        return text(`Closed "${state.title}". The course was not deleted, and the record stays ` +
+            `in pbl_status.`);
     });
 };

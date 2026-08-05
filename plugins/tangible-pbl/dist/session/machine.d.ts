@@ -1,5 +1,5 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
-import type { SessionState, Step } from './store.js';
+import type { CourseMemory, Step } from './memory.js';
 export declare const STEP_ORDER: Step[];
 export declare const nextStep: (step: Step) => Step;
 export interface MachineDeps {
@@ -38,8 +38,8 @@ export interface ApproveInput {
     emails?: string[];
 }
 export interface AdvanceResult {
-    state: SessionState;
+    state: CourseMemory;
     produced: Produced;
 }
-export declare const assertRevisable: (state: SessionState, step: Step) => void;
-export declare const advance: (deps: MachineDeps, state: SessionState, input?: ApproveInput) => Promise<AdvanceResult>;
+export declare const assertRevisable: (state: CourseMemory, step: Step) => void;
+export declare const advance: (deps: MachineDeps, state: CourseMemory, input?: ApproveInput) => Promise<AdvanceResult>;

@@ -1,15 +1,16 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   createCourse, generateContentUnits, generateProblems, generateSkills,
-  getCourse, selectContext, selectProblem, selectSkill, addContext,
+  getCourse, listContentUnits, selectContext, selectProblem, selectSkill, addContext,
   type ContextCategory, type CourseContext,
 } from '../api/builder.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
-import { advance, assertRevisable } from '../session/machine.js';
+import { advance, assertRevisable, type Produced } from '../session/machine.js';
 import { renderGate, renderLedger } from '../session/ledger.js';
-import type { SessionState, Step } from '../session/store.js';
+import { reconcile, renderResume } from '../session/reconcile.js';
+import type { CourseMemory, LogEntry, Step } from '../session/memory.js';
+import { resolveBusiness } from '../resolve.js';
 import type { Runtime } from '../server.js';
 import type { HttpClient } from '../http.js';
 import type { AuthManager } from '../auth.js';
@@ -91,6 +92,40 @@ const depsFor = (rt: Runtime, onProgress?: (m: string) => void) => ({
   onProgress,
 });
 
+/** One line per gate, recording what was chosen — never the full candidate list. */
+const describeProduced = (produced: Produced): string => {
+  switch (produced.kind) {
+    case 'skills': {
+      const kept = produced.skills.filter((s) => s.isSelected);
+      return `Kept ${kept.length} of ${produced.skills.length} skills: ` +
+        `${kept.map((s) => s.CoreCompetencyModel.name).join(', ') || '(none)'}`;
+    }
+    case 'problems':
+      return `Generated ${produced.problems.length} problem scenarios.`;
+    case 'outline':
+      return `Outline: ${produced.units.map((u) => u.title).join(', ') || '(empty)'}`;
+    case 'published':
+      return 'Course published.';
+    case 'invited':
+      return `Invited ${produced.count} learner${produced.count === 1 ? '' : 's'}.`;
+    case 'none':
+      return 'Advanced with nothing generated.';
+  }
+};
+
+/**
+ * The action recorded for a pbl_approve call. Most advances are just
+ * "approved", but produced.kind already tells us precisely when the human
+ * decision was to publish or to invite learners — LogEntry's action enum
+ * exists to capture exactly that distinction, so it is derived here rather
+ * than hardcoded to 'approved' regardless of what the gate actually did.
+ */
+const actionFor = (produced: Produced): LogEntry['action'] => {
+  if (produced.kind === 'published') return 'published';
+  if (produced.kind === 'invited') return 'invited';
+  return 'approved';
+};
+
 export const registerSessionTools = (
   server: McpServer,
   rt: { current: Runtime },
@@ -129,17 +164,21 @@ export const registerSessionTools = (
         current.http, current.auth, course.id, contexts ?? [], course.CourseContexts ?? [],
       );
 
-      const state: SessionState = {
-        id: randomUUID().slice(0, 8),
+      const now = new Date().toISOString();
+      const id = await current.store.allocateSlug(current.env, course.title, brief);
+      const state: CourseMemory = {
+        id,
+        title: course.title ?? brief.trim().split(/\s+/).slice(0, 8).join(' '),
         env: current.env,
         courseId: course.id,
-        businessId: ctx.businessId,
         businessName: ctx.businessName,
         brief,
         sourceUrl,
         step: 'context',
         awaitingApproval: true,
-        history: ['context'],
+        status: 'active',
+        created: now,
+        updated: now,
       };
       await current.store.save(state);
       current.activeSessionId = state.id;
@@ -161,14 +200,38 @@ export const registerSessionTools = (
         const all = await current.store.list(current.env);
         return text(
           all.length === 0
-            ? `No open sessions in ${current.env}.`
-            : all.map((s) => `${s.id} · ${s.businessName} · ${renderLedger(s)}`).join('\n'),
+            ? `No courses in ${current.env}.`
+            : all
+                .map((s) => `${s.id} · ${s.status} · ${s.businessName} · ${renderLedger(s)}`)
+                .join('\n'),
         );
       }
       const state = await current.store.load(current.env, sessionId);
       return text(
         renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }),
       );
+    },
+  );
+
+  server.tool(
+    'pbl_resume',
+    'Reopen a course by name, re-resolve its business, and report anything that ' +
+      'changed in the web app since. Never overwrites the backend.',
+    { course: z.string().describe('The course slug, as shown by pbl_status') },
+    async ({ course: slug }) => {
+      const current = rt.current;
+      const memory = await current.store.load(current.env, slug);
+
+      // businessId is deliberately not persisted — re-resolving by name keeps a
+      // UUID out of a file a human reads and makes the memory machine-portable.
+      const business = await resolveBusiness(current.http, current.auth, memory.businessName);
+      await current.auth.loginBusiness(business.id, business.name);
+
+      const course = await getCourse(current.http, current.auth, memory.courseId);
+      const units = await listContentUnits(current.http, current.auth, memory.courseId);
+      current.activeSessionId = memory.id;
+
+      return text(renderResume(memory, course, units, reconcile(memory, course, units)));
     },
   );
 
@@ -190,7 +253,12 @@ export const registerSessionTools = (
         state,
         input,
       );
-      await current.store.save(next);
+      const entry: LogEntry = {
+        step: next.step,
+        action: actionFor(produced),
+        detail: describeProduced(produced),
+      };
+      await current.store.save(next, entry);
       return text(renderGate(next, { appUrl: current.appUrl, produced }));
     },
   );
@@ -221,8 +289,9 @@ export const registerSessionTools = (
         ),
       selectSkills: z.array(z.string()).optional().describe('Skill names to keep; others are deselected'),
       selectProblem: z.string().optional().describe('Problem scenario title, id, or a unique prefix of either, to select'),
+      reason: z.string().optional().describe('Why this step is being redone — recorded in the course log'),
     },
-    async ({ sessionId, step, contexts, ...input }, extra) => {
+    async ({ sessionId, step, contexts, reason, ...input }, extra) => {
       const current = rt.current;
       const state = await current.store.load(current.env, sessionId);
       assertRevisable(state, step as Step);
@@ -233,7 +302,7 @@ export const registerSessionTools = (
 
       const onProgress = makeOnProgress(extra);
 
-      const rewound: SessionState = {
+      const rewound: CourseMemory = {
         ...state,
         step: step === 'context' ? 'context' : (
           { skills: 'context', problems: 'skills', outline: 'problems' } as const
@@ -241,7 +310,16 @@ export const registerSessionTools = (
         awaitingApproval: true,
       };
       const { state: next, produced } = await advance(depsFor(current, onProgress), rewound, input);
-      await current.store.save(next);
+      const added = (contexts ?? []).map((c) => `${c.category}="${c.value}"`).join('; ');
+      await current.store.save(next, {
+        step: step as Step,
+        action: 'revised',
+        detail: [
+          reason ?? 'No reason given.',
+          added ? `Added contexts: ${added}` : '',
+          describeProduced(produced),
+        ].filter(Boolean).join('\n'),
+      });
       return text(renderGate(next, { appUrl: current.appUrl, produced }));
     },
   );
@@ -252,9 +330,17 @@ export const registerSessionTools = (
     { sessionId: z.string() },
     async ({ sessionId }) => {
       const current = rt.current;
-      await current.store.delete(current.env, sessionId);
+      const state = await current.store.load(current.env, sessionId);
+      await current.store.save({ ...state, status: 'closed' }, {
+        step: state.step,
+        action: 'closed',
+        detail: 'Session closed. The course was not deleted.',
+      });
       if (current.activeSessionId === sessionId) current.activeSessionId = undefined;
-      return text(`Session ${sessionId} closed. The course was not deleted.`);
+      return text(
+        `Closed "${state.title}". The course was not deleted, and the record stays ` +
+          `in pbl_status.`,
+      );
     },
   );
 };
