@@ -1,5 +1,5 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
-import type { SessionState, Step } from './store.js';
+import type { CourseMemory, Step } from './memory.js';
 
 export const STEP_ORDER: Step[] = [
   'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
@@ -43,11 +43,11 @@ export interface ApproveInput {
 }
 
 export interface AdvanceResult {
-  state: SessionState;
+  state: CourseMemory;
   produced: Produced;
 }
 
-export const assertRevisable = (state: SessionState, step: Step): void => {
+export const assertRevisable = (state: CourseMemory, step: Step): void => {
   // The outline step's own advance() case is what calls generateContentUnits
   // and flips the course to DRAFT, so the freeze is in effect from the moment
   // state.step becomes 'outline' — not only once 'detail' is reached.
@@ -81,7 +81,7 @@ const byName = <T extends { id: string }>(
 
 export const advance = async (
   deps: MachineDeps,
-  state: SessionState,
+  state: CourseMemory,
   input: ApproveInput = {},
 ): Promise<AdvanceResult> => {
   if (!state.awaitingApproval) {
@@ -92,7 +92,7 @@ export const advance = async (
 
   const to = nextStep(state.step);
   const done = (produced: Produced): AdvanceResult => ({
-    state: { ...state, step: to, awaitingApproval: true, history: [...state.history, to] },
+    state: { ...state, step: to, awaitingApproval: true },
     produced,
   });
 
