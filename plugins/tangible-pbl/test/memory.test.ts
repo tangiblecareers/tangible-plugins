@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   serializeFrontmatter, parseFrontmatter, splitDocument, slugify,
-  type CourseMemory,
+  CourseMemoryStore, type CourseMemory, type LogEntry,
 } from '../src/session/memory.js';
 
 const memory = (over: Partial<CourseMemory> = {}): CourseMemory => ({
@@ -93,5 +97,148 @@ describe('slugify', () => {
     for (const t of ['系统 思考', '   ', '../../etc/passwd', 'Ünïcodé Cøursé']) {
       expect(slugify(t, 'fallback brief text here')).toMatch(/^[A-Za-z0-9_-]+$/);
     }
+  });
+});
+
+describe('CourseMemoryStore', () => {
+  let root: string;
+  let store: CourseMemoryStore;
+  const at = new Date('2026-08-05T10:12:00.000Z');
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-memory-'));
+    store = new CourseMemoryStore(root, () => at);
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const entry = (over: Partial<LogEntry> = {}): LogEntry => ({
+    step: 'skills', action: 'approved', detail: 'Kept 6 of 11.', ...over,
+  });
+
+  it('round-trips a memory', async () => {
+    await store.save(memory());
+    const loaded = await store.load('staging', 'intro-to-systems-thinking');
+    expect(loaded).toEqual(memory());
+  });
+
+  it('round-trips a brief containing markdown headings and colons', async () => {
+    const brief = 'Line one: with colon\n\n## Not a real section\n\nmore text';
+    await store.save(memory({ brief }));
+    expect((await store.load('staging', 'intro-to-systems-thinking')).brief).toBe(brief);
+  });
+
+  it('namespaces by environment', async () => {
+    await store.save(memory());
+    await expect(store.load('production', 'intro-to-systems-thinking')).rejects.toThrow(
+      /No course "intro-to-systems-thinking" in production/,
+    );
+  });
+
+  it('keeps same-slug courses in different environments apart', async () => {
+    await store.save(memory());
+    await store.save(memory({ env: 'production', courseId: 'c2' }));
+    expect((await store.load('staging', 'intro-to-systems-thinking')).courseId).toBe('c1');
+    expect((await store.load('production', 'intro-to-systems-thinking')).courseId).toBe('c2');
+  });
+
+  it('lists only the requested environment, including closed courses', async () => {
+    await store.save(memory());
+    await store.save(memory({ id: 'second', status: 'closed' }));
+    await store.save(memory({ id: 'third', env: 'production' }));
+    const ids = (await store.list('staging')).map((m) => m.id).sort();
+    expect(ids).toEqual(['intro-to-systems-thinking', 'second']);
+  });
+
+  it('returns an empty list when the environment has no courses', async () => {
+    await expect(store.list('production')).resolves.toEqual([]);
+  });
+
+  it('skips an unreadable file instead of failing the whole listing', async () => {
+    await store.save(memory());
+    await writeFile(join(root, 'staging', 'broken.md'), 'not a memory file\n', 'utf8');
+    const ids = (await store.list('staging')).map((m) => m.id);
+    expect(ids).toEqual(['intro-to-systems-thinking']);
+  });
+
+  it('rejects path traversal with absolute paths', async () => {
+    await expect(store.load('staging', '../../etc/passwd')).rejects.toThrow(
+      /Invalid course id/,
+    );
+  });
+
+  it('rejects path traversal to sibling environments', async () => {
+    await expect(store.load('staging', '../production/x')).rejects.toThrow(
+      /Invalid course id/,
+    );
+  });
+
+  it('rejects save with an unsafe id and creates nothing outside root', async () => {
+    await expect(store.save(memory({ id: '../outside/payload' }))).rejects.toThrow(
+      /Invalid course id/,
+    );
+    expect(await readdir(root)).not.toContain('outside');
+  });
+
+  it('appends a log entry before the Notes heading', async () => {
+    await store.save(memory());
+    await store.save(memory(), entry());
+    const text = await readFile(
+      join(root, 'staging', 'intro-to-systems-thinking.md'), 'utf8',
+    );
+    expect(text).toContain('### 10:12 · skills — approved\nKept 6 of 11.');
+    expect(text.indexOf('### 10:12')).toBeLessThan(text.indexOf('## Notes'));
+  });
+
+  it('preserves hand-written Notes text and earlier entries byte-for-byte', async () => {
+    await store.save(memory());
+    await store.save(memory(), entry({ detail: 'first entry' }));
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const edited = (await readFile(file, 'utf8')).replace(
+      '## Notes\n', '## Notes\nmy hand-written note\n',
+    );
+    await writeFile(file, edited, 'utf8');
+
+    await store.save(memory({ step: 'problems' }), entry({ detail: 'second entry' }));
+
+    const text = await readFile(file, 'utf8');
+    expect(text).toContain('my hand-written note');
+    expect(text).toContain('first entry');
+    expect(text).toContain('second entry');
+    expect(text.indexOf('first entry')).toBeLessThan(text.indexOf('second entry'));
+  });
+
+  it('rewrites frontmatter without touching the body when no entry is given', async () => {
+    await store.save(memory());
+    await store.save(memory(), entry({ detail: 'only entry' }));
+    const file = join(root, 'staging', 'intro-to-systems-thinking.md');
+    const before = (await readFile(file, 'utf8')).split('\n---\n')[1]!;
+
+    await store.save(memory({ awaitingApproval: false }));
+
+    const after = await readFile(file, 'utf8');
+    expect(after.split('\n---\n')[1]!).toBe(before);
+    expect(after).toContain('awaitingApproval: false');
+  });
+
+  it('leaves no .tmp file behind', async () => {
+    await store.save(memory());
+    await store.save(memory(), entry());
+    const names = await readdir(join(root, 'staging'));
+    expect(names.filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('allocates a colliding slug as -2, then -3', async () => {
+    const a = await store.allocateSlug('staging', 'Intro to Systems Thinking', 'b');
+    await store.save(memory({ id: a }));
+    const b = await store.allocateSlug('staging', 'Intro to Systems Thinking', 'b');
+    await store.save(memory({ id: b }));
+    const c = await store.allocateSlug('staging', 'Intro to Systems Thinking', 'b');
+    expect([a, b, c]).toEqual([
+      'intro-to-systems-thinking',
+      'intro-to-systems-thinking-2',
+      'intro-to-systems-thinking-3',
+    ]);
   });
 });

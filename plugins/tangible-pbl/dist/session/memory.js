@@ -1,3 +1,6 @@
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 /**
  * Flat `key: value` only, values JSON-encoded. A real YAML parser would be a
  * new dependency for a format we fully control, and JSON encoding is what lets
@@ -67,3 +70,152 @@ const kebab = (s) => s
 export const slugify = (title, brief) => kebab(title ?? '') ||
     kebab(brief.trim().split(/\s+/).slice(0, 5).join(' ')) ||
     'course';
+const assertSafeId = (id) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+        throw new Error(`Invalid course id "${id}".`);
+    }
+    return id;
+};
+const NOTES = '## Notes';
+// The document's headings always appear in this fixed order (see freshBody).
+// A section's content is free-form text that may itself contain a line
+// starting with "## " — e.g. a brief pasted with markdown in it — so the
+// boundary must be the *specific* next known heading, not the first "## "
+// found after the start, or embedded text would truncate the extraction.
+const NEXT_HEADING = { Brief: 'Log' };
+const section = (body, heading) => {
+    const start = body.indexOf(`## ${heading}\n`);
+    if (start === -1)
+        return '';
+    const from = start + `## ${heading}\n`.length;
+    const after = NEXT_HEADING[heading];
+    const next = after ? body.indexOf(`\n## ${after}`, from) : -1;
+    return body.slice(from, next === -1 ? undefined : next + 1).trim();
+};
+const hhmm = (d) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+export const renderEntry = (e, at) => `### ${hhmm(at)} · ${e.step} — ${e.action}\n${e.detail}\n`;
+const freshBody = (m) => [
+    `# ${m.title}`,
+    `${m.env} · ${m.businessName}`,
+    '',
+    '## Brief',
+    m.brief,
+    '',
+    '## Log',
+    '',
+    NOTES,
+    '',
+].join('\n');
+/**
+ * Insert immediately before the Notes heading so entries stay in chronological
+ * order and hand-written notes stay at the bottom. Everything outside the
+ * inserted block passes through verbatim — a revise appends a second entry
+ * rather than rewriting the first, which is what "why did this change" needs.
+ */
+const insertEntry = (body, rendered) => {
+    const at = body.indexOf(NOTES);
+    if (at === -1)
+        return `${body.replace(/\n*$/, '')}\n\n${rendered}`;
+    return `${body.slice(0, at)}${rendered}\n${body.slice(at)}`;
+};
+export class CourseMemoryStore {
+    root;
+    now;
+    constructor(root = join(homedir(), '.tangible-pbl-mcp', 'courses'), now = () => new Date()) {
+        this.root = root;
+        this.now = now;
+    }
+    #dir(env) {
+        return join(this.root, env);
+    }
+    #file(env, id) {
+        return join(this.#dir(env), `${assertSafeId(id)}.md`);
+    }
+    async save(m, entry) {
+        const file = this.#file(m.env, m.id);
+        await mkdir(this.#dir(m.env), { recursive: true });
+        let body;
+        try {
+            body = splitDocument(await readFile(file, 'utf8'), file).body;
+        }
+        catch {
+            body = freshBody(m);
+        }
+        if (entry)
+            body = insertEntry(body, renderEntry(entry, this.now()));
+        // `created`/`updated` are caller-managed (like every other field of `m`)
+        // and pass through untouched — the store only ever adds a rendered log
+        // entry, it never stamps bookkeeping fields the caller didn't set.
+        const next = { ...m };
+        const tmp = `${file}.tmp`;
+        await writeFile(tmp, `${serializeFrontmatter(next)}\n\n${body}`, 'utf8');
+        // rename() is atomic on POSIX: a crash leaves either the previous file or
+        // the complete new one, never a torn write.
+        await rename(tmp, file);
+    }
+    async load(env, id) {
+        const file = this.#file(env, id);
+        let text;
+        try {
+            text = await readFile(file, 'utf8');
+        }
+        catch {
+            throw new Error(`No course "${id}" in ${env}. Run pbl_status to see what is here.`);
+        }
+        return this.#parse(text, file, id, env);
+    }
+    #parse(text, file, id, env) {
+        const { front, body } = splitDocument(text, file);
+        return {
+            id,
+            title: String(front.course ?? id),
+            env,
+            courseId: String(front.courseId ?? ''),
+            businessName: String(front.business ?? ''),
+            brief: section(body, 'Brief'),
+            ...(front.sourceUrl ? { sourceUrl: String(front.sourceUrl) } : {}),
+            step: front.step,
+            awaitingApproval: front.awaitingApproval === true,
+            status: front.status,
+            created: String(front.created ?? ''),
+            updated: String(front.updated ?? ''),
+        };
+    }
+    async list(env) {
+        let names;
+        try {
+            names = await readdir(this.#dir(env));
+        }
+        catch {
+            return [];
+        }
+        const out = [];
+        for (const n of names.filter((n) => n.endsWith('.md'))) {
+            const file = join(this.#dir(env), n);
+            try {
+                out.push(this.#parse(await readFile(file, 'utf8'), file, n.slice(0, -3), env));
+            }
+            catch {
+                // Skip an unreadable file rather than failing the whole listing.
+            }
+        }
+        return out;
+    }
+    async allocateSlug(env, title, brief) {
+        const base = slugify(title, brief);
+        let taken;
+        try {
+            taken = await readdir(this.#dir(env));
+        }
+        catch {
+            return base;
+        }
+        const has = (s) => taken.includes(`${s}.md`);
+        if (!has(base))
+            return base;
+        for (let n = 2;; n++) {
+            if (!has(`${base}-${n}`))
+                return `${base}-${n}`;
+        }
+    }
+}

@@ -43,3 +43,14 @@ export declare const splitDocument: (text: string, file: string) => {
  * through, and 'course' is the last resort when both inputs are unusable.
  */
 export declare const slugify: (title: string | undefined, brief: string) => string;
+export declare const renderEntry: (e: LogEntry, at: Date) => string;
+export declare class CourseMemoryStore {
+    #private;
+    private readonly root;
+    private readonly now;
+    constructor(root?: string, now?: () => Date);
+    save(m: CourseMemory, entry?: LogEntry): Promise<void>;
+    load(env: Env, id: string): Promise<CourseMemory>;
+    list(env: Env): Promise<CourseMemory[]>;
+    allocateSlug(env: Env, title: string | undefined, brief: string): Promise<string>;
+}
