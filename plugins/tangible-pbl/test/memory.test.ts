@@ -120,7 +120,7 @@ describe('CourseMemoryStore', () => {
   it('round-trips a memory', async () => {
     await store.save(memory());
     const loaded = await store.load('staging', 'intro-to-systems-thinking');
-    expect(loaded).toEqual(memory());
+    expect(loaded).toEqual({ ...memory(), updated: at.toISOString() });
   });
 
   it('round-trips a brief containing markdown headings and colons', async () => {

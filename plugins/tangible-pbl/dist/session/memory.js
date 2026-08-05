@@ -82,6 +82,10 @@ const NOTES = '## Notes';
 // starting with "## " — e.g. a brief pasted with markdown in it — so the
 // boundary must be the *specific* next known heading, not the first "## "
 // found after the start, or embedded text would truncate the extraction.
+// `section()` is only correct for headings listed here — any heading absent
+// from this map extracts to end-of-document instead of stopping at its real
+// successor. Only 'Brief' is ever extracted today; add an entry here before
+// adding a second caller for a different heading.
 const NEXT_HEADING = { Brief: 'Log' };
 const section = (body, heading) => {
     const start = body.indexOf(`## ${heading}\n`);
@@ -143,10 +147,12 @@ export class CourseMemoryStore {
         }
         if (entry)
             body = insertEntry(body, renderEntry(entry, this.now()));
-        // `created`/`updated` are caller-managed (like every other field of `m`)
-        // and pass through untouched — the store only ever adds a rendered log
-        // entry, it never stamps bookkeeping fields the caller didn't set.
-        const next = { ...m };
+        // The store — not the caller — owns `updated`: it is the only place that
+        // knows a write actually happened. pbl_approve, pbl_revise and pbl_abort
+        // (Task 6) all save a state spread from the previous one, so if the
+        // caller controlled this field nothing would ever advance it and every
+        // one of those four call sites would have to remember to bump it itself.
+        const next = { ...m, updated: this.now().toISOString() };
         const tmp = `${file}.tmp`;
         await writeFile(tmp, `${serializeFrontmatter(next)}\n\n${body}`, 'utf8');
         // rename() is atomic on POSIX: a crash leaves either the previous file or
