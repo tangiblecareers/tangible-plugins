@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { AuthManager } from './auth.js';
 import { type Config, type Env } from './config.js';
 import { type HttpClient } from './http.js';
-import { SessionStore } from './session/store.js';
+import { CourseMemoryStore } from './session/memory.js';
 export interface Runtime {
     cfg: Config;
     env: Env;
@@ -10,7 +10,7 @@ export interface Runtime {
     appUrl: string;
     http: HttpClient;
     auth: AuthManager;
-    store: SessionStore;
+    store: CourseMemoryStore;
     activeSessionId?: string;
 }
 export declare const createRuntime: (cfg: Config, env?: Env) => Runtime;

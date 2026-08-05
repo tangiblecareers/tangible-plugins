@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createRuntime, switchEnvironment, type Runtime } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { AuthManager } from '../src/auth.js';
-import { SessionStore, type SessionState } from '../src/session/store.js';
+import { CourseMemoryStore, type CourseMemory } from '../src/session/memory.js';
 import { registerSessionTools } from '../src/tools/session.js';
 import type { HttpClient, RequestOpts } from '../src/http.js';
 
@@ -159,7 +159,7 @@ const makeRuntime = async (http: HttpClient, storeRoot: string): Promise<Runtime
     appUrl: 'https://stage.app',
     http,
     auth,
-    store: new SessionStore(storeRoot),
+    store: new CourseMemoryStore(storeRoot),
   };
 };
 
@@ -173,17 +173,20 @@ describe('pbl_revise — context step with new contexts', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const seedSession = async (store: SessionStore): Promise<void> => {
-    const state: SessionState = {
+  const seedSession = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
       id: 's1',
+      title: 'a brief',
       env: 'staging',
       courseId: 'c1',
-      businessId: 'b1',
       businessName: 'Acme',
       brief: 'a brief',
       step: 'skills',
       awaitingApproval: true,
-      history: ['context', 'skills'],
+      status: 'active',
+      created: now,
+      updated: now,
     };
     await store.save(state);
   };
@@ -515,17 +518,20 @@ describe('pbl_approve — progress notifications', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const seedAtContext = async (store: SessionStore): Promise<void> => {
-    const state: SessionState = {
+  const seedAtContext = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
       id: 's1',
+      title: 'a brief',
       env: 'staging',
       courseId: 'c1',
-      businessId: 'b1',
       businessName: 'Acme',
       brief: 'a brief',
       step: 'context',
       awaitingApproval: true,
-      history: ['context'],
+      status: 'active',
+      created: now,
+      updated: now,
     };
     await store.save(state);
   };
@@ -560,5 +566,261 @@ describe('pbl_approve — progress notifications', () => {
     await handlers.get('pbl_approve')!({ sessionId: 's1' }, { sendNotification });
 
     expect(sendNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('pbl_approve — course log entry', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-approve-log-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAtContext = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a brief',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'context',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('writes exactly one log entry recording what was produced', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtContext(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_approve')!({ sessionId: 's1' });
+
+    const file = join(root, 'staging', 's1.md');
+    const text = await readFile(file, 'utf8');
+    const entryCount = (text.match(/^### \d{2}:\d{2} · /gm) ?? []).length;
+    expect(entryCount).toBe(1);
+    expect(text).toMatch(/### \d{2}:\d{2} · skills — approved/);
+  });
+});
+
+describe('pbl_revise — course log entry', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-revise-log-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAtSkills = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a brief',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'skills',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('writes exactly one log entry carrying the given reason', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtSkills(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_revise')!({
+      sessionId: 's1',
+      step: 'context',
+      reason: 'Wrong duration selected',
+    });
+
+    const file = join(root, 'staging', 's1.md');
+    const text = await readFile(file, 'utf8');
+    const entryCount = (text.match(/^### \d{2}:\d{2} · /gm) ?? []).length;
+    expect(entryCount).toBe(1);
+    expect(text).toMatch(/### \d{2}:\d{2} · context — revised/);
+    expect(text).toContain('Wrong duration selected');
+  });
+
+  it('records "No reason given." when no reason is supplied', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seedAtSkills(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_revise')!({ sessionId: 's1', step: 'context' });
+
+    const file = join(root, 'staging', 's1.md');
+    const text = await readFile(file, 'utf8');
+    expect(text).toContain('No reason given.');
+  });
+});
+
+describe('pbl_abort — closes rather than deletes', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-abort-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seed = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a course',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'skills',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('leaves the course file in place, marked closed, with one log entry, and still loadable by pbl_status', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seed(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_abort')!({ sessionId: 's1' });
+
+    // The file must still exist and be loadable — a delete-based
+    // implementation would make this load() reject with "No course ... ".
+    const reloaded = await rtHolder.current.store.load('staging', 's1');
+    expect(reloaded.status).toBe('closed');
+    expect(reloaded.title).toBe('a course');
+
+    const file = join(root, 'staging', 's1.md');
+    const text = await readFile(file, 'utf8');
+    const entryCount = (text.match(/^### \d{2}:\d{2} · /gm) ?? []).length;
+    expect(entryCount).toBe(1);
+    expect(text).toMatch(/### \d{2}:\d{2} · skills — closed/);
+  });
+
+  it('clears activeSessionId only when the aborted session was the active one', async () => {
+    const { http } = buildFakeHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    rtHolder.current.activeSessionId = 's1';
+    await seed(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_abort')!({ sessionId: 's1' });
+
+    expect(rtHolder.current.activeSessionId).toBeUndefined();
+  });
+});
+
+describe('pbl_resume', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-resume-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const buildResumeHttp = () => {
+    const calls: RequestOpts[] = [];
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        calls.push(opts);
+        if (opts.path === 'auth/login') return { id: 'u1', token: 'user' } as T;
+        if (opts.path === 'auth/business/login') {
+          return { token: 'biz', businessRole: 'ADMIN' } as T;
+        }
+        if (opts.method === 'GET' && opts.path === 'user/profile/u1') {
+          return {
+            usersInBusiness: [
+              { businessId: 'b1', role: 'EDUCATOR', businessUserInBusiness: { id: 'b1', name: 'Acme' } },
+            ],
+          } as T;
+        }
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1') {
+          return { id: 'c1', title: 'Course Title', status: 'DRAFT', CourseContexts: [] } as T;
+        }
+        if (opts.method === 'GET' && opts.path === 'business/courses/c1/content-units') {
+          return [{ id: 'cu1', title: 'Unit One' }] as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    return { http, calls };
+  };
+
+  const seed = async (store: CourseMemoryStore): Promise<void> => {
+    const now = new Date().toISOString();
+    const state: CourseMemory = {
+      id: 's1',
+      title: 'a course',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'skills',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    };
+    await store.save(state);
+  };
+
+  it('reopens by slug, re-resolves the business, and reports differences without mutating the file', async () => {
+    const { http } = buildResumeHttp();
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seed(rtHolder.current.store);
+    const before = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_resume')!({ course: 's1' });
+
+    expect(result.content[0].text).toContain('Resumed "a course"');
+    // Memory stopped at "skills" but the backend is already DRAFT — reconcile
+    // should surface that as a difference.
+    expect(result.content[0].text).toContain('frozen');
+    expect(rtHolder.current.activeSessionId).toBe('s1');
+
+    // pbl_resume must never advance or otherwise write to the file.
+    const after = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(after).toBe(before);
+  });
+
+  it('never prints the courseId or a bare UUID anywhere in its output', async () => {
+    const { http } = buildResumeHttp();
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seed(rtHolder.current.store);
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_resume')!({ course: 's1' });
+
+    expect(result.content[0].text).not.toContain('c1');
   });
 });

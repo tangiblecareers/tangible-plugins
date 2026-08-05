@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { renderLedger, renderGate, courseUrl } from '../src/session/ledger.js';
-import type { SessionState } from '../src/session/store.js';
+import type { CourseMemory } from '../src/session/memory.js';
 
-const state = (over: Partial<SessionState> = {}): SessionState => ({
-  id: 's1', env: 'staging', courseId: 'c1', businessId: 'b1',
+const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
+  id: 's1', title: 'brief', env: 'staging', courseId: 'c1',
   businessName: 'Acme', brief: 'brief', step: 'skills',
-  awaitingApproval: true, history: ['skills'], ...over,
+  awaitingApproval: true, status: 'active',
+  created: '2026-08-05T10:00:00.000Z', updated: '2026-08-05T10:00:00.000Z',
+  ...over,
 });
 
 describe('courseUrl', () => {

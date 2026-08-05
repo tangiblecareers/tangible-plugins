@@ -42,7 +42,7 @@ export const advance = async (deps, state, input = {}) => {
     }
     const to = nextStep(state.step);
     const done = (produced) => ({
-        state: { ...state, step: to, awaitingApproval: true, history: [...state.history, to] },
+        state: { ...state, step: to, awaitingApproval: true },
         produced,
     });
     switch (to) {
