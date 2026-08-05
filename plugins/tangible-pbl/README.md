@@ -115,7 +115,7 @@ inviting).
 
 ## Tool reference
 
-13 tools, in three groups.
+14 tools, in three groups.
 
 **Context** — establish who you are and where you're working
 
@@ -131,10 +131,11 @@ inviting).
 | tool | does |
 |---|---|
 | `pbl_start_course` | Create a course from a brief and stop at the first gate. Pass the full text of the source document as `brief`. |
-| `pbl_status` | Show a session’s progress, or list open sessions in this environment. |
+| `pbl_status` | Show a course’s progress, or list every course — open and closed — in this environment. |
+| `pbl_resume` | Reopen a course by name, re-resolve its business, and report anything that changed in the web app since (title edited, course already `DRAFT`/`PUBLISHED`/`ARCHIVED`). Never writes anything — it only reads and reports. |
 | `pbl_approve` | Advance the session exactly one step. This is the only way forward — nothing advances on its own. |
 | `pbl_revise` | Redo a step with changes — pass `contexts` to add new context items when step is "context". Context, skills and problems are frozen once the outline exists. |
-| `pbl_abort` | Close the session. The course is left exactly as it is. |
+| `pbl_abort` | Close the session. The course is left exactly as it is — closing marks the record `closed` in its memory file; it is never deleted. |
 
 `pbl_revise`'s `contexts` field (step `"context"` only, same item shape as
 `pbl_start_course`'s): each new item is created **un-selected** on the
@@ -276,7 +277,7 @@ server to everyone who installs. Run `npm run build` before committing.
 
 To verify the built server end to end without a client, start it with staging
 env vars and send it an MCP `initialize` followed by `tools/list` over stdin —
-it should report `pbl-mcp` and list 13 tools.
+it should report `pbl-mcp` and list 14 tools.
 
 ### History
 

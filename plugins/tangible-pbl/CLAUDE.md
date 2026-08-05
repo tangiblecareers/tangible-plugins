@@ -26,13 +26,27 @@ product's entire premise; `test/machine.test.ts` enforces it. If a change makes
 exception is `courseId` inside the review URL, where it is a routing path
 segment. This applies to error messages too, not just rendered gate output.
 
-**Environment isolation is layered, and all layers matter.** Session files are
-namespaced `sessions/<env>/`; `assertSafeId` (`/^[A-Za-z0-9_-]+$/`) blocks
-path traversal through a caller-supplied `sessionId`; the zod enum on
+**Environment isolation is layered, and all layers matter.** Course memory
+files are namespaced `courses/<env>/`; `assertSafeId` (`/^[A-Za-z0-9_-]+$/`)
+blocks path traversal through a caller-supplied `sessionId`; the zod enum on
 `pbl_use_environment` is the *only* runtime validation of `env`; every tool
 handler snapshots `const current = rt.current` at entry so a mid-flight
 environment switch cannot mix old and new. Do not remove any of these
 individually — each covers a different attack.
+
+**Course memory is append-only.** `CourseMemoryStore.save` rewrites the
+frontmatter and inserts at most one log entry; every other byte of the body —
+including hand-written `## Notes` and every earlier entry — passes through
+verbatim. A revise appends a second entry rather than editing the first. Tests
+in `test/memory.test.ts` pin this. There is no `delete`: `pbl_abort` sets
+`status: closed`, and removing a record is the user's to do with `rm`.
+
+**`pbl_publish` and `pbl_invite` write no log entry, by design.** Both live in
+`src/tools/direct.ts` and take a raw `courseId` rather than a course slug —
+there is no memory file to write the entry to. This is a decided boundary,
+not an oversight: those two are escape hatches for operating on any course,
+session or not, and `reconcile()` catches an out-of-band publish the next
+time someone runs `pbl_resume` against that course.
 
 ## Backend behaviour you cannot infer from the code
 
@@ -72,7 +86,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 111 tests
+npm test          # vitest run, 161 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -83,7 +97,7 @@ without a rebuilt `dist/` ships a stale server to everyone who installs.
 
 To verify the built server without a client: start `dist/index.js` with staging
 env vars and send it an MCP `initialize` then `tools/list` over stdin. It should
-report `pbl-mcp` and list **13** tools.
+report `pbl-mcp` and list **14** tools.
 
 ## Testing lessons this codebase learned the hard way
 
@@ -126,8 +140,6 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 - **No request timeout.** A slow generation surfaces as a raw
   `UND_ERR_HEADERS_TIMEOUT`, not a `TangibleApiError`, and not something an
   operator can act on.
-- `SessionState.businessId` / `brief` / `sourceUrl` / `history` are persisted
-  and never read. `history` should at minimum be `Step[]`.
 - `advance()` past `done` is unbounded — it re-saves and appends forever.
 - `advance()`'s `if (!state.awaitingApproval)` guard is **unreachable** —
   nothing ever sets it false. It is not the reentrancy protection it appears to
@@ -138,7 +150,7 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## Never verified against a real backend
 
-**No part of this has run against a live Tangible instance.** All 111 tests use
+**No part of this has run against a live Tangible instance.** All 161 tests use
 mocked HTTP. The README's "Before you trust it" checklist is the smoke test,
 and it needs staging credentials that did not exist when this was built.
 
@@ -161,16 +173,12 @@ decides whether the `detail` layer is worth building.
 
 ## Current state
 
-- The plugin is merged to `main` and on GitHub (PR #2, `6cff661`). All 66 files
-  are there.
-- **`marketplace.json` on `origin/main` is broken.** During the merge, the
-  `tangible-pbl` entry lost its closing brace and its keys merged into
-  `tangible-git`'s object. Duplicate JSON keys resolve last-wins, so the file
-  parses cleanly while the plugin is **absent from the marketplace** —
-  `/plugin install tangible-pbl@tangible` reports not-found, with nothing in
-  the file looking wrong.
-- The fix is in local commit `c4f2cb0`. **Until that is pushed, nobody can
-  install the plugin**, even though its code is on `main`.
-- Lesson for anyone editing that file: re-parse it and check the resulting
-  plugin *list*. A structural error there does not raise a parse error — it
-  silently deletes an entry.
+- The plugin is merged to `main`, installable, and listed correctly in
+  `.claude-plugin/marketplace.json`. An earlier revision of this file
+  documented a marketplace-entry corruption bug from the initial merge; that
+  was fixed in `18e37a6` and is resolved.
+- Releases are now automated: `release-please` derives each plugin's version
+  from conventional commits, and `scripts/validate.mjs` fails the build if
+  `package.json`, `.claude-plugin/plugin.json`, or the root
+  `.claude-plugin/marketplace.json` are edited by hand. Do not bump versions
+  yourself.
