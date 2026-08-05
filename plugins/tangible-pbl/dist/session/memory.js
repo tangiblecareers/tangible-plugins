@@ -53,3 +53,17 @@ export const splitDocument = (text, file) => {
     const m = FRONT_RE.exec(text);
     return { front, body: text.slice(m[0].length).replace(/^\n+/, '') };
 };
+const kebab = (s) => s
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+/**
+ * `Course.title` is optional on the API, so the brief is the fallback. The
+ * result always satisfies assertSafeId — non-latin titles kebab to '' and fall
+ * through, and 'course' is the last resort when both inputs are unusable.
+ */
+export const slugify = (title, brief) => kebab(title ?? '') ||
+    kebab(brief.trim().split(/\s+/).slice(0, 5).join(' ')) ||
+    'course';

@@ -37,3 +37,9 @@ export declare const splitDocument: (text: string, file: string) => {
     front: Record<string, unknown>;
     body: string;
 };
+/**
+ * `Course.title` is optional on the API, so the brief is the fallback. The
+ * result always satisfies assertSafeId — non-latin titles kebab to '' and fall
+ * through, and 'course' is the last resort when both inputs are unusable.
+ */
+export declare const slugify: (title: string | undefined, brief: string) => string;
