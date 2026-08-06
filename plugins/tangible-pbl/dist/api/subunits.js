@@ -33,6 +33,10 @@ export const assignSkill = (http, auth, courseId, contentUnitId, subUnitId, body
     path: `${subUnits(courseId, contentUnitId)}/${subUnitId}/skills`,
     body,
 });
+export const listSubUnitSkills = async (http, auth, courseId, contentUnitId, subUnitId) => asArray(await call(http, auth, {
+    method: 'GET',
+    path: `${subUnits(courseId, contentUnitId)}/${subUnitId}/skills`,
+}), 'skills');
 /** 409 when an artifact already exists — the caller treats that as satisfied. */
 export const generateArtifact = (http, auth, courseId, contentUnitId, subUnitId, body = {}) => call(http, auth, {
     method: 'POST',

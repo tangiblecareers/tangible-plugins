@@ -71,6 +71,18 @@ export const assignSkill = (
     body,
   });
 
+export const listSubUnitSkills = async (
+  http: HttpClient, auth: AuthManager,
+  courseId: string, contentUnitId: string, subUnitId: string,
+): Promise<SubUnitSkill[]> =>
+  asArray<SubUnitSkill>(
+    await call<unknown>(http, auth, {
+      method: 'GET',
+      path: `${subUnits(courseId, contentUnitId)}/${subUnitId}/skills`,
+    }),
+    'skills',
+  );
+
 /** 409 when an artifact already exists — the caller treats that as satisfied. */
 export const generateArtifact = (
   http: HttpClient, auth: AuthManager,
