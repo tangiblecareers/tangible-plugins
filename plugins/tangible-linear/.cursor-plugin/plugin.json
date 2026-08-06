@@ -2,7 +2,7 @@
   "name": "tangible-linear",
   "displayName": "Tangible Linear",
   "description": "Tangible Careers' Linear conventions for AI agents — issues, projects, sprint date-labels, status hygiene, and dependencies",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": {
     "name": "Tangible Engineering",
     "email": "kaushal.mishra@tangible.careers"
@@ -10,6 +10,12 @@
   "homepage": "https://github.com/tangiblecareers/tangible-plugins",
   "repository": "https://github.com/tangiblecareers/tangible-plugins",
   "license": "MIT",
-  "keywords": ["linear", "tangible", "sprint", "project-management", "scrum"],
+  "keywords": [
+    "linear",
+    "tangible",
+    "sprint",
+    "project-management",
+    "scrum"
+  ],
   "skills": "./skills/"
 }
