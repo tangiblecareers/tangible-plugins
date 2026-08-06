@@ -6,7 +6,7 @@ import type { Env } from '../config.js';
 
 export type Step =
   | 'context' | 'skills' | 'problems' | 'outline'
-  | 'detail' | 'publish' | 'invite' | 'done';
+  | 'detail' | 'artifacts' | 'publish' | 'invite' | 'done';
 
 export type CourseStatusLabel = 'active' | 'closed' | 'published';
 
@@ -149,7 +149,7 @@ const assertSafeId = (id: string): string => {
 // depends on memory.ts for these very types. Keep in sync with machine.ts's
 // STEP_ORDER by hand if a step is ever added or renamed.
 const STEPS: readonly Step[] = [
-  'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+  'context', 'skills', 'problems', 'outline', 'detail', 'artifacts', 'publish', 'invite', 'done',
 ];
 const STATUS_LABELS: readonly CourseStatusLabel[] = ['active', 'closed', 'published'];
 

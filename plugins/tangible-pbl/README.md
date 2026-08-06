@@ -10,10 +10,10 @@ write, and every gate hands back a URL so the author can look at the real
 course in the real UI before approving. Nothing in this server drives a
 browser.
 
-Six approval gates keep a human in the loop at each expensive, irreversible,
+Eight approval gates keep a human in the loop at each expensive, irreversible,
 or fan-out step. Nothing advances without an explicit `pbl_approve`.
 
-## The six gates
+## The eight gates
 
 | gate | after | protects against |
 |---|---|---|
@@ -21,8 +21,10 @@ or fan-out step. Nothing advances without an explicit `pbl_approve`.
 | 2 | skills generated | everything downstream (problems, outline) is scoped by these — wrong skills, wrong course |
 | 3 | problem selected | the scenario determines the entire outline; this is the **last** point the course's foundations can still change (see "The outline freeze" below) |
 | 4 | outline built | last look before sub-units, resources and artifacts build on top of it |
-| 5 | before publish (`pbl_publish`) | a state transition — learners can see the course afterwards |
-| 6 | before invitations (`pbl_invite`) | sends real mail to real people; not undoable |
+| 5 | sub-content units created | the whole breakdown is resolved and validated against the live course before the first write — a bad content-unit or skill name fails here, not mid-creation; once sub-units exist, undoing them means deleting them by hand |
+| 6 | artifacts generated | one artifact per sub-unit is generated against whatever was approved at gate 5 — review the generated (and any failed) artifacts before the next approval publishes the course |
+| 7 | before publish (`pbl_publish`) | a state transition — learners can see the course afterwards |
+| 8 | before invitations (`pbl_invite`) | sends real mail to real people; not undoable |
 
 Every gate response opens with the active environment banner (`staging` or
 `⚠ PRODUCTION`), a ledger of steps completed so far, what was just produced
@@ -137,6 +139,25 @@ inviting).
 | `pbl_revise` | Redo a step with changes — pass `contexts` to add new context items when step is "context". Context, skills and problems are frozen once the outline exists. |
 | `pbl_abort` | Close the session. The course is left exactly as it is — closing marks the record `closed` in its memory file; it is never deleted. |
 
+`pbl_approve`'s `subUnits` field (step `"outline"` → `"detail"` only) is the
+whole sub-content-unit breakdown for the course, one entry per sub-unit:
+`{ contentUnit, title, description?, minutes?, skills[] }`. `contentUnit` and
+every entry of `skills` are names — resolved against the outline's content
+units and the course's selected skills — never ids. `minutes` is estimated
+duration **in minutes**, mapped onto the backend's `estimatedDuration`. The
+whole breakdown is validated (`planSubUnits` in `src/session/detail-plan.ts`)
+before the first sub-unit is created, so an unknown content-unit name, an
+unknown or level-less skill name, more than ten skills on one sub-unit, or an
+out-of-range `minutes` fails the call with nothing created — never a
+partially-built course with no way to tell which half succeeded.
+
+`pbl_approve`'s `instruction` field (step `"detail"` → `"artifacts"` only) is
+an optional steer applied identically to every artifact generated at that
+gate — there is no per-sub-unit instruction. One artifact is generated per
+sub-unit; a 409 (an artifact already exists) counts as satisfied, and a
+failure on one sub-unit does not stop the rest — the gate always advances,
+and its response lists both what generated and what failed, by title.
+
 `pbl_revise`'s `contexts` field (step `"context"` only, same item shape as
 `pbl_start_course`'s): each new item is created **un-selected** on the
 backend, then selected immediately by the tool so it counts toward the next
@@ -156,15 +177,20 @@ behavior on those two categories.
 |---|---|
 | `pbl_open_in_app` | Return the Tangible app URL for a course, for eyes-on review. |
 | `pbl_add_resource` | Attach a link or text resource to a sub-content unit. |
-| `pbl_publish` | Publish a DRAFT course. Gate 5 — learners can see it afterwards. |
-| `pbl_invite` | Invite learners by email. Gate 6 — this sends real mail and cannot be undone. |
+| `pbl_publish` | Publish a DRAFT course — checks locally first and names which content units are still missing a sub-unit with a skill, instead of surfacing Tangible's bare 400. Learners can see it afterwards. |
+| `pbl_invite` | Invite learners by email — this sends real mail and cannot be undone. |
 
-`pbl_add_resource` is registered but **currently undrivable by any caller**:
-it requires `contentUnitId` and `subUnitId`, but no tool in this server
-returns a content-unit id (the outline gate renders titles only, by design —
-see "no UUIDs" throughout this README) and nothing creates a sub-content
-unit — there is no `sub-content-units` wrapper under `src/api/`. See
-"Current limitations" below.
+`pbl_add_resource` takes `contentUnit` and `subUnit` **names**, not ids —
+resolved with the same exact→prefix→ambiguity `byName` lookup used
+everywhere else in this server. Those names come from `pbl_status`: once a
+course has passed the `detail` gate, its response includes a breakdown
+listing every content unit and, indented under each, its sub-content units by
+title — that listing is what makes this tool reachable at all.
+
+**Breaking change:** earlier revisions of this tool took `contentUnitId` and
+`subUnitId`. Any saved `pbl_add_resource` invocation from before the detail
+layer landed needs its arguments changed to the `contentUnit`/`subUnit` names
+shown by `pbl_status`.
 
 ## Course memory
 
@@ -259,22 +285,9 @@ change.
 
 ## Current limitations
 
-Read these before using this against a real business. Neither is a bug in
-what's shipped; both are known, deliberate gaps.
+Read this before using this against a real business. It is not a bug in
+what's shipped; it's a known, deliberate gap.
 
-- **It cannot publish yet.** The `detail` step (sub-content units, resources,
-  artifacts under each outline unit) is currently a pass-through in the
-  session state machine — it creates no sub-content units at all. Tangible's
-  backend refuses to publish a course whose content units don't each have at
-  least one sub-content unit with a skill assigned, so `pbl_publish` will
-  return the backend's own 400 error until the `detail` layer is built. That
-  work is a deliberate follow-on, not an oversight — do not expect
-  `pbl_publish` (gate 5) to succeed today.
-- **`pbl_add_resource` cannot be driven by any caller today.** It requires
-  `contentUnitId` and `subUnitId`, but no tool returns a content-unit id (the
-  outline gate deliberately renders titles only) and nothing in this server
-  creates a sub-content unit. The tool is registered ahead of the `detail`
-  layer landing, not because it's usable now.
 - **Credentials are real user passwords, not scoped tokens.** The `env`
   values in your MCP config are a full login for a real Tangible account,
   carrying that account's full business role (`ADMIN`/`MANAGER`) — not a
@@ -300,15 +313,19 @@ here as a bug report, not user error:
 3. **`pbl_start_course`** — use a real brief (paste real document text, not a
    placeholder) and pass at least one context item per category
    (`DURATION`, `LEARNING_OUTCOME`, `LEARNER_PROFILE`).
-4. **`pbl_approve` × 4** — call it through skills → problems → outline →
-   detail. Verify each call advances **exactly one** step of the ledger — no
-   skipping, no double-advancing.
+4. **`pbl_approve` × 5** — call it through skills → problems → outline →
+   detail → artifacts. Verify each call advances **exactly one** step of the
+   ledger — no skipping, no double-advancing. At the `detail` gate, pass a
+   real `subUnits` breakdown; at `artifacts`, try an optional `instruction` if
+   you want to test the steer.
 5. **Open the review URL** returned by the gate and confirm what's on screen
    in the Tangible app matches what the gate response said was produced
-   (skills, problem scenarios, outline units).
-6. Only after all of the above hold, attempt the publish gate and note that
-   it is expected to fail with a 400 today (see "Current limitations")
-   until the `detail` layer lands.
+   (skills, problem scenarios, outline units, sub-content units, artifacts).
+6. Only after all of the above hold, call `pbl_approve` once more — this is
+   the call that actually publishes the course, since the sub-units and
+   skills created at the `detail` gate satisfy Tangible's publish
+   precondition. Treat a failure here as a bug report, not an expected
+   outcome.
 
 Do not skip straight to `pbl_publish` or `pbl_invite` on a business anyone
 depends on — invitations send real mail and cannot be undone.

@@ -1,8 +1,12 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
 import type { CourseMemory, Step } from './memory.js';
+import { byName } from './by-name.js';
+import { planSubUnits, type SubUnitSpec } from './detail-plan.js';
+import type { SubContentUnit } from '../api/subunits.js';
 
 export const STEP_ORDER: Step[] = [
-  'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+  'context', 'skills', 'problems', 'outline', 'detail', 'artifacts',
+  'publish', 'invite', 'done',
 ];
 
 /** Steps the backend freezes once content-units/generate flips the course to DRAFT. */
@@ -21,6 +25,20 @@ export interface MachineDeps {
   getCourse(courseId: string): Promise<Course>;
   selectSkill(courseId: string, courseSkillId: string, on: boolean): Promise<Course>;
   selectProblem(courseId: string, problemId: string, on: boolean): Promise<Course>;
+  listContentUnits(courseId: string): Promise<ContentUnit[]>;
+  createSubUnit(
+    courseId: string, contentUnitId: string,
+    values: { title: string; description?: string; estimatedDuration?: number },
+  ): Promise<SubContentUnit>;
+  assignSkill(
+    courseId: string, contentUnitId: string, subUnitId: string,
+    body: { coreCompetencyModelId: string; levelId: string },
+  ): Promise<unknown>;
+  listSubUnits(courseId: string, contentUnitId: string): Promise<SubContentUnit[]>;
+  generateArtifact(
+    courseId: string, contentUnitId: string, subUnitId: string,
+    body: { instruction?: string },
+  ): Promise<unknown>;
   publish(courseId: string): Promise<Course>;
   invite(courseId: string, emails: string[]): Promise<unknown>;
   onProgress?(message: string): void;
@@ -30,6 +48,8 @@ export type Produced =
   | { kind: 'skills'; skills: CourseSkill[] }
   | { kind: 'problems'; problems: CourseProblem[] }
   | { kind: 'outline'; units: ContentUnit[] }
+  | { kind: 'detail'; created: { contentUnitTitle: string; title: string; skills: string[] }[] }
+  | { kind: 'artifacts'; generated: string[]; failed: { title: string; reason: string }[] }
   | { kind: 'published' }
   | { kind: 'invited'; count: number }
   | { kind: 'none' };
@@ -40,6 +60,10 @@ export interface ApproveInput {
   /** Problem title, id, or a unique prefix of either, to select. */
   selectProblem?: string;
   emails?: string[];
+  /** The sub-content-unit breakdown, required when advancing to "detail". */
+  subUnits?: SubUnitSpec[];
+  /** Optional steer applied to every artifact generated at the "artifacts" gate. */
+  instruction?: string;
 }
 
 export interface AdvanceResult {
@@ -59,24 +83,6 @@ export const assertRevisable = (state: CourseMemory, step: Step): void => {
         `course with an adjusted brief, or revise the outline instead.`,
     );
   }
-};
-
-const byName = <T extends { id: string }>(
-  items: T[], label: (t: T) => string, needle: string, what: string,
-): T => {
-  const n = needle.trim().toLowerCase();
-  const isMatch = (i: T) => label(i).toLowerCase() === n || i.id.toLowerCase() === n;
-  const isPrefix = (i: T) =>
-    label(i).toLowerCase().startsWith(n) || i.id.toLowerCase().startsWith(n);
-  const exact = items.filter(isMatch);
-  if (exact.length === 1) return exact[0]!;
-  const pre = items.filter(isPrefix);
-  if (pre.length === 1) return pre[0]!;
-  const all = items.map(label).join(', ');
-  if (pre.length > 1) {
-    throw new Error(`"${needle}" matches more than one ${what}: ${pre.map(label).join(', ')}`);
-  }
-  throw new Error(`No ${what} matching "${needle}". Available: ${all}`);
 };
 
 export const advance = async (
@@ -139,11 +145,116 @@ export const advance = async (
       return done({ kind: 'outline', units });
     }
 
-    case 'detail':
-      // Sub-units, resources and artifacts are created un-gated by the tools
-      // layer; this step exists so the outline gate and the publish gate stay
-      // distinct in the ledger.
-      return done({ kind: 'none' });
+    case 'detail': {
+      if (!input.subUnits?.length) {
+        throw new Error(
+          'Pass subUnits to build the detail layer — each needs a contentUnit name, a ' +
+            'title, and at least one skill name. Nothing is created until this call.',
+        );
+      }
+      // Resolve and validate the whole breakdown first. planSubUnits throws
+      // rather than resolving partially, so a bad name cannot leave half the
+      // sub-units created with no way to tell which.
+      const [units, course] = await Promise.all([
+        deps.listContentUnits(state.courseId),
+        deps.getCourse(state.courseId),
+      ]);
+      const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? []);
+
+      const created: { contentUnitTitle: string; title: string; skills: string[] }[] = [];
+      try {
+        for (const r of plan) {
+          deps.onProgress?.(`Creating "${r.title}"…`);
+          const su = await deps.createSubUnit(state.courseId, r.contentUnitId, {
+            title: r.title,
+            ...(r.description !== undefined ? { description: r.description } : {}),
+            ...(r.estimatedDuration !== undefined
+              ? { estimatedDuration: r.estimatedDuration }
+              : {}),
+          });
+          for (const skill of r.skills) {
+            await deps.assignSkill(state.courseId, r.contentUnitId, su.id, {
+              coreCompetencyModelId: skill.coreCompetencyModelId,
+              levelId: skill.levelId,
+            });
+          }
+          created.push({
+            contentUnitTitle: r.contentUnitTitle,
+            title: r.title,
+            skills: r.skills.map((s) => s.name),
+          });
+        }
+      } catch (err) {
+        // The spec accepted partial creation on the condition that the gate
+        // reports exactly what landed. Without this, `created` is discarded
+        // with the stack frame, state.step stays 'outline', and the natural
+        // response — re-running pbl_approve with the same breakdown —
+        // duplicates entries 1..created.length, which (combined with the
+        // duplicate-title check above) permanently breaks pbl_add_resource
+        // for them. Still throws: partial success is not success.
+        const landed = created
+          .map((c) => `  ${c.contentUnitTitle} › ${c.title}`)
+          .join('\n');
+        throw new Error(
+          `Created ${created.length} of ${plan.length} sub-content units before this failed:\n` +
+            `${landed.length > 0 ? landed : '  (none)'}\n` +
+            `Re-running pbl_approve with this breakdown would duplicate the ones listed above ` +
+            `— resend only the entries that are not listed. Underlying error: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
+      return done({ kind: 'detail', created });
+    }
+
+    case 'artifacts': {
+      const units = await deps.listContentUnits(state.courseId);
+      const generated: string[] = [];
+      const failed: { title: string; reason: string }[] = [];
+
+      for (const unit of units) {
+        for (const sub of await deps.listSubUnits(state.courseId, unit.id)) {
+          deps.onProgress?.(`Generating the artifact for "${sub.title}"…`);
+          try {
+            await deps.generateArtifact(state.courseId, unit.id, sub.id, {
+              ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
+            });
+            generated.push(sub.title);
+          } catch (err) {
+            // 409 means an artifact already exists, which satisfies the goal of
+            // "every sub-unit has one" — regenerating is a separate decision.
+            if ((err as { status?: number }).status === 409) {
+              generated.push(sub.title);
+              continue;
+            }
+            // Carry on: aborting here would discard every generation that
+            // already succeeded, and there is no way to resume mid-gate.
+            failed.push({
+              title: sub.title,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+
+      // asArray (subunits.ts) returns [] silently for an unrecognised list
+      // shape — deliberately, and not changed here. But that silence means a
+      // wrongly-shaped response and "the detail gate created nothing" are
+      // indistinguishable from generated:[]/failed:[] alone, and this gate
+      // would otherwise advance having done nothing: pbl_publish then reports
+      // "has no sub-content units" (false — sub-units may well exist),
+      // pbl_status shows nothing, and none of that points at the real cause.
+      // Refuse to advance on this vacuous case instead.
+      if (units.length > 0 && generated.length === 0 && failed.length === 0) {
+        throw new Error(
+          `No sub-units were found under any of the ${units.length} content unit` +
+            `${units.length === 1 ? '' : 's'}. Either the detail gate created nothing, or the ` +
+            `sub-unit list response is not shaped the way listSubUnits expects. Run pbl_status ` +
+            `to see the breakdown before retrying.`,
+        );
+      }
+      return done({ kind: 'artifacts', generated, failed });
+    }
 
     case 'publish': {
       deps.onProgress?.('Publishing…');

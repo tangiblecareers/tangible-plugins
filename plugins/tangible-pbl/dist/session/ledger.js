@@ -5,6 +5,35 @@ export const renderLedger = (state) => {
     const at = STEP_ORDER.indexOf(state.step);
     return VISIBLE.map((s, i) => `${i <= at ? '✓' : '○'} ${s}`).join(' · ');
 };
+/**
+ * Renders the content-unit / sub-unit / skill breakdown pbl_status shows once
+ * the "detail" step is reached. This is how an operator confirms the detail
+ * gate did what they approved, and spots a sub-unit that would block
+ * pbl_publish before running it.
+ *
+ * `SubUnitSkill.name` is optional (subunits.ts) — the backend can return a
+ * skill with only a bare `coreCompetencyModelId`. Rendering that id would be
+ * a UUID leak, breaching this plugin's standing non-negotiable. A sub-unit
+ * whose skills are not all named therefore renders as a count instead of a
+ * name list — do NOT "fix" this by falling back to the id.
+ */
+export const renderBreakdown = (units) => {
+    const lines = [];
+    for (const u of units) {
+        lines.push(u.title);
+        for (const s of u.subs) {
+            if (s.skills.length === 0) {
+                lines.push(`  ${s.title}`);
+                continue;
+            }
+            const names = s.skills.map((k) => k.name).filter((n) => Boolean(n));
+            lines.push(names.length === s.skills.length
+                ? `  ${s.title} [${names.join(', ')}]`
+                : `  ${s.title} (${s.skills.length} skill${s.skills.length === 1 ? '' : 's'})`);
+        }
+    }
+    return lines.length > 0 ? `\n\nBreakdown:\n${lines.join('\n')}` : '';
+};
 const renderProduced = (produced) => {
     switch (produced.kind) {
         case 'skills':
@@ -20,6 +49,17 @@ const renderProduced = (produced) => {
             return produced.units.length === 0
                 ? 'No content units were generated.'
                 : ['Outline:', ...produced.units.map((u, i) => `  ${i + 1}. ${u.title}`)].join('\n');
+        case 'detail':
+            return produced.created.length === 0
+                ? 'No sub-content units were created.'
+                : ['Sub-content units:', ...produced.created.map((c) => `  ${c.contentUnitTitle} › ${c.title} [${c.skills.join(', ')}]`)].join('\n');
+        case 'artifacts': {
+            const lines = [`Artifacts: ${produced.generated.length} generated.`];
+            if (produced.failed.length > 0) {
+                lines.push(`${produced.failed.length} failed:`, ...produced.failed.map((f) => `  ${f.title} — ${f.reason}`));
+            }
+            return lines.join('\n');
+        }
         case 'published':
             return 'Course published.';
         case 'invited':
@@ -36,20 +76,11 @@ export const renderGate = (state, opts) => {
     const next = upcoming === 'done'
         ? 'Nothing further — call pbl_abort to close the session.'
         : `Next: ${upcoming}. Call pbl_approve to continue, or pbl_revise to change this step.`;
-    // Sub-content units don't exist yet (see README, "Current limitations"), so
-    // pbl_publish will 400 no matter how far the ledger says the session has
-    // come. Say so here — this gate response is the only surface an operator
-    // actually reads.
-    const detailLimitation = state.step === 'detail'
-        ? 'No sub-content units are created yet — `pbl_publish` will return a backend ' +
-            '400 until the detail layer lands. See README, "Current limitations".'
-        : '';
     return [
         banner,
         renderLedger(state),
         '',
         renderProduced(opts.produced),
-        detailLimitation,
         '',
         `Review: ${courseUrl(opts.appUrl, state.courseId)}`,
         next,

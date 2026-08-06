@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderLedger, renderGate, courseUrl } from '../src/session/ledger.js';
+import { renderLedger, renderGate, courseUrl, renderBreakdown } from '../src/session/ledger.js';
 import type { CourseMemory } from '../src/session/memory.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
@@ -180,21 +180,131 @@ describe('renderGate', () => {
     expect(out).toContain('No content units were generated.');
   });
 
-  it('states the known publish limitation at the detail gate', () => {
+  // The detail gate used to append a "pbl_publish will 400" limitation
+  // notice, back when 'detail' was a no-op that created nothing. Now that
+  // reaching this step means the gate that advanced into it just created the
+  // sub-units, that notice would be actively wrong — it must stay gone.
+  it('no longer states the old publish limitation at the detail gate', () => {
     const out = renderGate(state({ step: 'detail' }), {
       appUrl: 'https://x',
       produced: { kind: 'none' },
     });
-    expect(out).toContain('pbl_publish');
-    expect(out).toContain('400');
-    expect(out).toMatch(/detail layer/);
+    expect(out).not.toMatch(/detail layer/);
+    expect(out).not.toContain('pbl_publish');
   });
 
-  it('does not state the publish limitation at other gates', () => {
-    const out = renderGate(state({ step: 'outline' }), {
+  // Produced's 'detail' variant carries only names (contentUnitTitle, title,
+  // skill names) — never an id field — so there is no fixture that could make
+  // a "not.toContain(id)" assertion here meaningful; the real no-id guarantee
+  // against realistic API shapes (cu1/su1/ccm1/lvl1 present in the fixture) is
+  // exercised end-to-end in tools.test.ts's "creates the breakdown..." test.
+  it('lists created sub-content units by name, grouped under their content unit', () => {
+    const out = renderGate(state({ step: 'detail' }), {
       appUrl: 'https://x',
-      produced: { kind: 'outline', units: [] },
+      produced: {
+        kind: 'detail',
+        created: [
+          { contentUnitTitle: 'Module One', title: 'Lesson A', skills: ['Triage'] },
+          { contentUnitTitle: 'Module Two', title: 'Lesson B', skills: ['Comms', 'Escalation'] },
+        ],
+      },
     });
-    expect(out).not.toMatch(/detail layer/);
+    expect(out).toContain('Module One › Lesson A [Triage]');
+    expect(out).toContain('Module Two › Lesson B [Comms, Escalation]');
+  });
+
+  it('renders empty detail collection', () => {
+    const out = renderGate(state({ step: 'detail' }), {
+      appUrl: 'https://x',
+      produced: { kind: 'detail', created: [] },
+    });
+    expect(out).toContain('No sub-content units were created.');
+  });
+
+  it('renders generated artifact count with no failures', () => {
+    const out = renderGate(state({ step: 'artifacts' }), {
+      appUrl: 'https://x',
+      produced: { kind: 'artifacts', generated: ['Lesson A', 'Lesson B'], failed: [] },
+    });
+    expect(out).toContain('Artifacts: 2 generated.');
+    expect(out).not.toContain('failed');
+  });
+
+  it('lists artifact failures by title and reason, alongside the generated count', () => {
+    const out = renderGate(state({ step: 'artifacts' }), {
+      appUrl: 'https://x',
+      produced: {
+        kind: 'artifacts',
+        generated: ['Lesson A'],
+        failed: [{ title: 'Lesson B', reason: 'upstream exploded' }],
+      },
+    });
+    expect(out).toContain('Artifacts: 1 generated.');
+    expect(out).toContain('1 failed:');
+    expect(out).toContain('Lesson B — upstream exploded');
+  });
+});
+
+describe('renderBreakdown', () => {
+  it('lists content units and sub-units, with named skills in brackets', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [
+          { title: 'Lesson A', skills: [{ coreCompetencyModelId: 'ccm1', name: 'Visual Hierarchy' }] },
+        ],
+      },
+    ]);
+    expect(out).toContain('Module One');
+    expect(out).toContain('Lesson A [Visual Hierarchy]');
+    expect(out).not.toContain('ccm1');
+  });
+
+  it('renders a sub-unit with no skills as just its title', () => {
+    const out = renderBreakdown([
+      { title: 'Module One', subs: [{ title: 'Lesson A', skills: [] }] },
+    ]);
+    expect(out).toContain('Lesson A');
+    expect(out).not.toContain('[');
+  });
+
+  // Regression guard: SubUnitSkill.name is optional — the backend can return
+  // a skill with only a bare coreCompetencyModelId. Rendering that id would
+  // be a UUID leak. The fixture below makes the forbidden id reachable (the
+  // skill genuinely has no name), so this test actually exercises the
+  // fallback rather than passing vacuously — see CLAUDE.md's testing lessons
+  // on why a reachable fixture is required for a negative assertion to mean
+  // anything.
+  it('never renders a bare coreCompetencyModelId — falls back to a skill count', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [{ title: 'Lesson A', skills: [{ coreCompetencyModelId: 'ccm-secret-uuid' }] }],
+      },
+    ]);
+    expect(out).toContain('Lesson A (1 skill)');
+    expect(out).not.toContain('ccm-secret-uuid');
+  });
+
+  it('falls back to a count for the whole sub-unit when only some of its skills are named', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [{
+          title: 'Lesson A',
+          skills: [
+            { coreCompetencyModelId: 'ccm1', name: 'Visual Hierarchy' },
+            { coreCompetencyModelId: 'ccm-secret-uuid' },
+          ],
+        }],
+      },
+    ]);
+    expect(out).toContain('Lesson A (2 skills)');
+    expect(out).not.toContain('ccm-secret-uuid');
+    expect(out).not.toContain('Visual Hierarchy');
+  });
+
+  it('returns an empty string for no content units, so pbl_status appends nothing', () => {
+    expect(renderBreakdown([])).toBe('');
   });
 });

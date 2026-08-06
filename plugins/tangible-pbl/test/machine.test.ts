@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { advance, assertRevisable, nextStep, STEP_ORDER } from '../src/session/machine.js';
+import type { MachineDeps } from '../src/session/machine.js';
 import type { CourseMemory } from '../src/session/memory.js';
+import { createHttpClient } from '../src/http.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
   id: 's1', title: 'Intro', env: 'staging', courseId: 'c1',
@@ -10,23 +12,38 @@ const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
 });
 
 const SKILLS = [
-  { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'm1', name: 'Triage' } },
-  { id: 'cs2', isSelected: true, CoreCompetencyModel: { id: 'm2', name: 'Comms' } },
+  {
+    id: 'cs1', isSelected: true,
+    CoreCompetencyModel: { id: 'm1', name: 'Triage' },
+    Level: { id: 'lvl1', name: 'Foundational' },
+  },
+  {
+    id: 'cs2', isSelected: true,
+    CoreCompetencyModel: { id: 'm2', name: 'Comms' },
+    Level: { id: 'lvl2', name: 'Foundational' },
+  },
 ];
 const PROBLEMS = [
   { id: 'p1', title: 'Outage', isSelected: false },
   { id: 'p2', title: 'Breach', isSelected: false },
 ];
+const UNITS = [{ id: 'u1', title: 'Unit 1' }];
 
 const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
   generateSkills: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING', CourseSkills: SKILLS }),
   generateProblems: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING', CourseProblems: PROBLEMS }),
-  generateContentUnits: vi.fn().mockResolvedValue([{ id: 'u1', title: 'Unit 1' }]),
+  generateContentUnits: vi.fn().mockResolvedValue(UNITS),
   getCourse: vi.fn().mockResolvedValue({
     id: 'c1', status: 'DRAFT', CourseSkills: SKILLS, CourseProblems: PROBLEMS,
   }),
   selectSkill: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING' }),
   selectProblem: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING' }),
+  listContentUnits: vi.fn().mockResolvedValue(UNITS),
+  createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) =>
+    Promise.resolve({ id: `su-${v.title}`, title: v.title })),
+  assignSkill: vi.fn().mockResolvedValue({}),
+  listSubUnits: vi.fn().mockResolvedValue([]),
+  generateArtifact: vi.fn().mockResolvedValue({}),
   publish: vi.fn().mockResolvedValue({ id: 'c1', status: 'PUBLISHED' }),
   invite: vi.fn().mockResolvedValue({}),
   ...over,
@@ -35,7 +52,8 @@ const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
 describe('STEP_ORDER', () => {
   it('matches the builder pipeline', () => {
     expect(STEP_ORDER).toEqual([
-      'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+      'context', 'skills', 'problems', 'outline', 'detail', 'artifacts',
+      'publish', 'invite', 'done',
     ]);
   });
 
@@ -64,8 +82,12 @@ describe('the gate guarantee', () => {
   it('never reaches publish without four explicit advances', async () => {
     const d = deps();
     let s = state({ step: 'context' });
+    const input = {
+      selectProblem: 'p1',
+      subUnits: [{ contentUnit: 'Unit 1', title: 'Lesson', skills: ['Triage'] }],
+    };
     for (const expected of ['skills', 'problems', 'outline', 'detail']) {
-      ({ state: s } = await advance(d, s, { selectProblem: 'p1' }));
+      ({ state: s } = await advance(d, s, input));
       expect(s.step).toBe(expected);
       expect(d.publish).not.toHaveBeenCalled();
     }
@@ -153,7 +175,7 @@ describe('advance produces reviewable output', () => {
 
   it('publishes then invites across two gates', async () => {
     const d = deps();
-    let s = state({ step: 'detail' });
+    let s = state({ step: 'artifacts' });
     ({ state: s } = await advance(d, s));
     expect(d.publish).toHaveBeenCalledWith('c1');
     expect(s.step).toBe('publish');
@@ -202,5 +224,287 @@ describe('assertRevisable', () => {
 
   it('still allows revising the outline after it exists', () => {
     expect(() => assertRevisable(state({ step: 'detail' }), 'outline')).not.toThrow();
+  });
+});
+
+describe('advance to detail', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const skills = [{
+    id: 'cs1', isSelected: true,
+    CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+    Level: { id: 'lvl1', name: 'Foundational' },
+  }];
+
+  const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: skills }),
+    createSubUnit: vi.fn().mockImplementation((_c, _cu, v) =>
+      Promise.resolve({ id: `su-${v.title}`, title: v.title })),
+    assignSkill: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  const input = {
+    subUnits: [{
+      contentUnit: 'Module One',
+      title: 'Lesson A',
+      minutes: 45,
+      skills: ['Visual Hierarchy'],
+    }],
+  };
+
+  it('creates each sub-unit and assigns its skills', async () => {
+    const d = detailDeps();
+    const { state: s, produced } = await advance(d, state({ step: 'outline' }), input);
+    expect(s.step).toBe('detail');
+    expect(d.createSubUnit).toHaveBeenCalledWith('c1', 'cu1', {
+      title: 'Lesson A', estimatedDuration: 45,
+    });
+    expect(d.assignSkill).toHaveBeenCalledWith('c1', 'cu1', 'su-Lesson A', {
+      coreCompetencyModelId: 'ccm1', levelId: 'lvl1',
+    });
+    expect(produced).toEqual({
+      kind: 'detail',
+      created: [{ contentUnitTitle: 'Module One', title: 'Lesson A', skills: ['Visual Hierarchy'] }],
+    });
+  });
+
+  it('refuses to advance without a breakdown', async () => {
+    await expect(advance(detailDeps(), state({ step: 'outline' }), {}))
+      .rejects.toThrow(/subUnits/);
+    // An empty array is truthy, so the `{}` case above alone cannot catch a
+    // regression from `.subUnits?.length` to a bare `!input.subUnits` check.
+    // This must be asserted explicitly.
+    await expect(advance(detailDeps(), state({ step: 'outline' }), { subUnits: [] }))
+      .rejects.toThrow(/subUnits/);
+  });
+
+  it('writes nothing when validation fails', async () => {
+    const d = detailDeps();
+    await expect(
+      advance(d, state({ step: 'outline' }), {
+        subUnits: [{ contentUnit: 'Nope', title: 'A', skills: ['Visual Hierarchy'] }],
+      }),
+    ).rejects.toThrow(/No content unit matching/);
+    // The whole point of validating first: a bad name in the breakdown must not
+    // leave half of it created.
+    expect(d.createSubUnit).not.toHaveBeenCalled();
+    expect(d.assignSkill).not.toHaveBeenCalled();
+  });
+
+  it('validates every entry before creating any of them', async () => {
+    const d = detailDeps();
+    await expect(
+      advance(d, state({ step: 'outline' }), {
+        subUnits: [
+          { contentUnit: 'Module One', title: 'Good', skills: ['Visual Hierarchy'] },
+          { contentUnit: 'Module One', title: 'Bad', skills: ['Unknown'] },
+        ],
+      }),
+    ).rejects.toThrow(/No skill matching "Unknown"/);
+    expect(d.createSubUnit).not.toHaveBeenCalled();
+  });
+});
+
+describe('advance to detail — partial failure mid-loop', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const threeSkills = [
+    {
+      id: 'cs1', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+      Level: { id: 'lvl1', name: 'Foundational' },
+    },
+    {
+      id: 'cs2', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm2', name: 'Typography' },
+      Level: { id: 'lvl2', name: 'Foundational' },
+    },
+    {
+      id: 'cs3', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm3', name: 'Critique' },
+      Level: { id: 'lvl3', name: 'Foundational' },
+    },
+  ];
+
+  const input = {
+    subUnits: [
+      { contentUnit: 'Module One', title: 'Lesson A', skills: ['Visual Hierarchy'] },
+      { contentUnit: 'Module One', title: 'Lesson B', skills: ['Typography'] },
+      { contentUnit: 'Module One', title: 'Lesson C', skills: ['Critique'] },
+    ],
+  };
+
+  const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: threeSkills }),
+    assignSkill: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  it('reports exactly what landed, warns about resending, and preserves the cause', async () => {
+    let calls = 0;
+    const d = detailDeps({
+      createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) => {
+        calls += 1;
+        if (calls === 3) return Promise.reject(new Error('upstream exploded'));
+        return Promise.resolve({ id: `su-${v.title}`, title: v.title });
+      }),
+    });
+
+    const err = await advance(d, state({ step: 'outline' }), input)
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err).toBeDefined();
+    expect(err!.message).toContain('2 of 3');
+    expect(err!.message).toContain('Module One › Lesson A');
+    expect(err!.message).toContain('Module One › Lesson B');
+    // Lesson C never landed — it must not be listed as though it did.
+    expect(err!.message).not.toContain('Lesson C');
+    expect(err!.message).toMatch(/duplicate/i);
+    expect(err!.message).toContain('upstream exploded');
+    expect((err as unknown as { cause?: unknown }).cause).toBeInstanceOf(Error);
+  });
+
+  it('reports 0 of N when the very first creation fails', async () => {
+    const d = detailDeps({
+      createSubUnit: vi.fn().mockRejectedValue(new Error('nope')),
+    });
+
+    const err = await advance(d, state({ step: 'outline' }), input)
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('0 of 3');
+    expect(err!.message).toContain('(none)');
+    expect(err!.message).not.toContain('Lesson A');
+  });
+});
+
+describe('advance to artifacts', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const subs = [{ id: 'su1', title: 'Lesson A' }, { id: 'su2', title: 'Lesson B' }];
+
+  const artifactDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    listSubUnits: vi.fn().mockResolvedValue(subs),
+    generateArtifact: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  it('generates one artifact per sub-unit', async () => {
+    const d = artifactDeps();
+    const { state: s, produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(s.step).toBe('artifacts');
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({ kind: 'artifacts', generated: ['Lesson A', 'Lesson B'], failed: [] });
+  });
+
+  it('passes the instruction to every call', async () => {
+    const d = artifactDeps();
+    await advance(d, state({ step: 'detail' }), { instruction: 'keep it practical' });
+    // Guard the loop below with a call-count assertion first — a loop over
+    // zero calls would otherwise pass vacuously if generateArtifact were
+    // never invoked at all.
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    for (const call of (d.generateArtifact as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[3]).toEqual({ instruction: 'keep it practical' });
+    }
+  });
+
+  it('counts a 409 as already satisfied, not a failure', async () => {
+    const conflict = Object.assign(new Error('artifact exists'), { status: 409 });
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(conflict)
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({ kind: 'artifacts', generated: ['Lesson A', 'Lesson B'], failed: [] });
+  });
+
+  it('continues past a failure and reports both lists', async () => {
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(new Error('upstream exploded'))
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    // Aborting on the first failure would discard the second generation and
+    // leave no way to resume mid-gate.
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({
+      kind: 'artifacts',
+      generated: ['Lesson B'],
+      failed: [{ title: 'Lesson A', reason: 'upstream exploded' }],
+    });
+  });
+
+  it('advances even when every artifact fails, so the gate is not a dead end', async () => {
+    const d = artifactDeps({
+      generateArtifact: vi.fn().mockRejectedValue(new Error('nope')),
+    });
+    const { state: s, produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(s.step).toBe('artifacts');
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).generated).toEqual([]);
+    expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).failed).toHaveLength(2);
+  });
+
+  // asArray (subunits.ts) returns [] silently for a listSubUnits response
+  // shaped unexpectedly — not changed here, that's pinned separately in
+  // test/subunits.test.ts. But if that silence reaches this gate unchecked,
+  // it advances having generated nothing, and every downstream symptom
+  // (pbl_publish's false "has no sub-content units", an empty pbl_status)
+  // points away from the real cause. Content units exist here; sub-units
+  // just never came back.
+  it('refuses to advance on a vacuous run — content units exist but no sub-units were found', async () => {
+    const d = artifactDeps({ listSubUnits: vi.fn().mockResolvedValue([]) });
+    await expect(advance(d, state({ step: 'detail' }), {}))
+      .rejects.toThrow(/no sub-units.*content unit.*pbl_status/is);
+    expect(d.generateArtifact).not.toHaveBeenCalled();
+  });
+
+  it('advances normally when there are no content units at all — nothing to generate is not vacuous', async () => {
+    const d = artifactDeps({
+      listContentUnits: vi.fn().mockResolvedValue([]),
+      listSubUnits: vi.fn(),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(produced).toEqual({ kind: 'artifacts', generated: [], failed: [] });
+    expect(d.listSubUnits).not.toHaveBeenCalled();
+  });
+
+  // Regression: a TangibleApiError's message is the backend's own free text,
+  // and the backend can embed a sub-unit or course id directly in it (e.g. a
+  // not-found or duplicate-resource error). Route the rejection through the
+  // real http.ts so this pins the actual production chain — redaction lives
+  // in http.ts, not in machine.ts's catch — rather than asserting against a
+  // hand-built error that was never at risk of carrying an id in the first
+  // place.
+  it('never lets a UUID embedded in the backend message reach failed[].reason', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ message: 'Sub-unit 8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a not found' }),
+        { status: 404, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    const rejection = await http
+      .request({ method: 'POST', path: 'x' })
+      .catch((e: unknown) => e);
+
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(rejection)
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    const failed = (produced as { failed: { title: string; reason: string }[] }).failed;
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.reason).toContain('not found');
+    expect(failed[0]!.reason).not.toContain('8f14e45f');
   });
 });

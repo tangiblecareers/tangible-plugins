@@ -1,5 +1,7 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
 import type { CourseMemory, Step } from './memory.js';
+import { type SubUnitSpec } from './detail-plan.js';
+import type { SubContentUnit } from '../api/subunits.js';
 export declare const STEP_ORDER: Step[];
 export declare const nextStep: (step: Step) => Step;
 export interface MachineDeps {
@@ -9,6 +11,20 @@ export interface MachineDeps {
     getCourse(courseId: string): Promise<Course>;
     selectSkill(courseId: string, courseSkillId: string, on: boolean): Promise<Course>;
     selectProblem(courseId: string, problemId: string, on: boolean): Promise<Course>;
+    listContentUnits(courseId: string): Promise<ContentUnit[]>;
+    createSubUnit(courseId: string, contentUnitId: string, values: {
+        title: string;
+        description?: string;
+        estimatedDuration?: number;
+    }): Promise<SubContentUnit>;
+    assignSkill(courseId: string, contentUnitId: string, subUnitId: string, body: {
+        coreCompetencyModelId: string;
+        levelId: string;
+    }): Promise<unknown>;
+    listSubUnits(courseId: string, contentUnitId: string): Promise<SubContentUnit[]>;
+    generateArtifact(courseId: string, contentUnitId: string, subUnitId: string, body: {
+        instruction?: string;
+    }): Promise<unknown>;
     publish(courseId: string): Promise<Course>;
     invite(courseId: string, emails: string[]): Promise<unknown>;
     onProgress?(message: string): void;
@@ -23,6 +39,20 @@ export type Produced = {
     kind: 'outline';
     units: ContentUnit[];
 } | {
+    kind: 'detail';
+    created: {
+        contentUnitTitle: string;
+        title: string;
+        skills: string[];
+    }[];
+} | {
+    kind: 'artifacts';
+    generated: string[];
+    failed: {
+        title: string;
+        reason: string;
+    }[];
+} | {
     kind: 'published';
 } | {
     kind: 'invited';
@@ -36,6 +66,10 @@ export interface ApproveInput {
     /** Problem title, id, or a unique prefix of either, to select. */
     selectProblem?: string;
     emails?: string[];
+    /** The sub-content-unit breakdown, required when advancing to "detail". */
+    subUnits?: SubUnitSpec[];
+    /** Optional steer applied to every artifact generated at the "artifacts" gate. */
+    instruction?: string;
 }
 export interface AdvanceResult {
     state: CourseMemory;

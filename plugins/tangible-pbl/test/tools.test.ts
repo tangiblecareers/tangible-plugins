@@ -9,6 +9,7 @@ import { AuthManager } from '../src/auth.js';
 import { CourseMemoryStore, type CourseMemory } from '../src/session/memory.js';
 import { reconcile } from '../src/session/reconcile.js';
 import { registerSessionTools } from '../src/tools/session.js';
+import { registerDirectTools } from '../src/tools/direct.js';
 import type { HttpClient, RequestOpts } from '../src/http.js';
 
 const CFG = loadConfig({
@@ -745,7 +746,9 @@ describe('pbl_approve — publish gate sets status', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const seedAtDetail = async (store: CourseMemoryStore): Promise<void> => {
+  // Seeded one step short of publish. STEP_ORDER inserted 'artifacts' between
+  // 'detail' and 'publish' (see machine.ts) — 'artifacts' is now that spot.
+  const seedAtArtifacts = async (store: CourseMemoryStore): Promise<void> => {
     const now = new Date().toISOString();
     const state: CourseMemory = {
       id: 's1',
@@ -754,7 +757,7 @@ describe('pbl_approve — publish gate sets status', () => {
       courseId: 'c1',
       businessName: 'Acme',
       brief: 'a brief',
-      step: 'detail',
+      step: 'artifacts',
       awaitingApproval: true,
       status: 'active',
       created: now,
@@ -776,7 +779,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('persists status: "published" on the memory once the publish gate is approved', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' });
@@ -787,7 +790,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('the persisted memory no longer trips reconcile\'s "never marked published" warning', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' });
@@ -799,7 +802,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('keeps status "published" through a subsequent pbl_abort, so reconcile does not falsely warn it was never published', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' }); // publish gate
@@ -1265,5 +1268,343 @@ describe('pbl_abort — unreadable memory file', () => {
 
     expect(result.content[0].text).toContain('Closed "Fine"');
     expect((await rtHolder.current.store.load('staging', 'fine')).status).toBe('closed');
+  });
+});
+
+describe('pbl_approve — detail and artifacts gates', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-detail-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /** Records every request and answers the reads each gate makes. */
+  const gateHttp = (answers: [RegExp, unknown][]) => {
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      for (const [re, body] of answers) if (re.test(opts.path)) return body;
+      return {};
+    });
+    return { http: { request } as unknown as HttpClient, calls };
+  };
+
+  const seed = async (store: CourseMemoryStore, step: 'outline' | 'detail') =>
+    store.save({
+      id: 's1', title: 'A course', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step, awaitingApproval: true,
+      status: 'active', created: '2026-08-06T10:00:00.000Z',
+      updated: '2026-08-06T10:00:00.000Z',
+    } as CourseMemory);
+
+  it('creates the breakdown and logs it by name, with no id in the output', async () => {
+    const { http } = gateHttp([
+      [/^business\/courses\/c1$/, {
+        id: 'c1', status: 'DRAFT',
+        CourseSkills: [{
+          id: 'cs1', isSelected: true,
+          CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+          Level: { id: 'lvl1', name: 'Foundational' },
+        }],
+      }],
+      // Anchored on the preceding slash: "sub-content-units" ends in
+      // "content-units" too, so an unanchored /content-units$/ would also
+      // match the create-sub-unit route below and shadow it (checked first,
+      // in array order) — returning an array with no top-level `id` for
+      // what should be the created sub-unit.
+      [/\/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+      [/sub-content-units$/, { id: 'su1', title: 'Lesson A' }],
+    ]);
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seed(rtHolder.current.store, 'outline');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_approve')!({
+      sessionId: 's1',
+      subUnits: [{
+        contentUnit: 'Module One', title: 'Lesson A', minutes: 45,
+        skills: ['Visual Hierarchy'],
+      }],
+    });
+
+    const out = result.content[0].text;
+    expect(out).toContain('Module One › Lesson A');
+    expect(out).toContain('Visual Hierarchy');
+    expect(out).not.toMatch(/cu1|su1|ccm1|lvl1/);
+
+    const file = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(file).toContain('Lesson A');
+    expect(file).not.toMatch(/cu1|su1|ccm1|lvl1/);
+    expect((await rtHolder.current.store.load('staging', 's1')).step).toBe('detail');
+  });
+
+  it('reports an artifact failure and still advances the gate', async () => {
+    let generateCalls = 0;
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path.endsWith('/artifact/generate')) {
+        generateCalls += 1;
+        if (generateCalls === 1) throw new Error('upstream exploded');
+        return {};
+      }
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }, { id: 'su2', title: 'Lesson B' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      return {};
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seed(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_approve')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    // Both were attempted: aborting on the first failure would have discarded
+    // the second generation with no way to resume mid-gate.
+    expect(generateCalls).toBe(2);
+    expect(out).toContain('1 generated');
+    expect(out).toContain('Lesson A — upstream exploded');
+    expect((await rtHolder.current.store.load('staging', 's1')).step).toBe('artifacts');
+  });
+});
+
+describe('pbl_status — breakdown listing', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-status-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAt = async (store: CourseMemoryStore, step: CourseMemory['step']) =>
+    store.save({
+      id: 's1', title: 'A course', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step, awaitingApproval: true,
+      status: 'active', created: '2026-08-06T10:00:00.000Z',
+      updated: '2026-08-06T10:00:00.000Z',
+    } as CourseMemory);
+
+  it('does not call content-units/sub-units for a course that has not reached "detail"', async () => {
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      // Any content-units or sub-content-units call is exactly what a
+      // pre-"detail" session must not pay for — fail loudly if it happens.
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'context');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+
+    expect(result.content[0].text).not.toContain('Breakdown:');
+    expect(calls.some((c) => /content-units/.test(c.path))).toBe(false);
+  });
+
+  it('lists content units, sub-units and their skills by name, with no id, once "detail" is reached', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
+        return [{ coreCompetencyModelId: 'ccm1', levelId: 'lvl1', name: 'Visual Hierarchy' }];
+      }
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Breakdown:');
+    expect(out).toContain('Module One');
+    expect(out).toContain('Lesson A');
+    expect(out).toContain('Visual Hierarchy');
+    expect(out).not.toMatch(/cu1|su1|ccm1|lvl1/);
+  });
+
+  // Regression guard for the UUID non-negotiable: SubUnitSkill.name is
+  // optional, so a skill with only a bare coreCompetencyModelId must never
+  // render as that id. The fixture below makes the forbidden id genuinely
+  // reachable (the skill has no name), so this test cannot pass vacuously.
+  it('never renders a bare coreCompetencyModelId in the breakdown — falls back to a count', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
+        return [{ coreCompetencyModelId: 'ccm-secret-uuid' }];
+      }
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Lesson A (1 skill)');
+    expect(out).not.toContain('ccm-secret-uuid');
+  });
+});
+
+/**
+ * `direct.ts`'s tools take a courseId directly, so these need no seeded memory —
+ * just a runtime whose http answers the reads each tool makes. `routed` maps a
+ * path fragment to a response and records every request.
+ */
+const routed = (answers: [RegExp, unknown][]) => {
+  const calls: RequestOpts[] = [];
+  const request = vi.fn(async (opts: RequestOpts) => {
+    calls.push(opts);
+    if (opts.path === 'auth/business/login' || opts.path === 'auth/login') {
+      return { token: 'biz', businessRole: 'ADMIN' };
+    }
+    for (const [re, body] of answers) if (re.test(opts.path)) return body;
+    return {};
+  });
+  return { http: { request } as unknown as HttpClient, calls };
+};
+
+const directRuntime = async (http: HttpClient): Promise<{ current: Runtime }> => {
+  const auth = new AuthManager(http, { email: 'a@b.c', password: 'pw' });
+  await auth.loginBusiness('b1', 'Acme');
+  return {
+    current: {
+      cfg: CFG, env: 'staging', appUrl: 'https://stage.app', http, auth,
+      store: new CourseMemoryStore('/tmp/unused-by-direct-tools'),
+    } as unknown as Runtime,
+  };
+};
+
+describe('pbl_add_resource — addressed by name', () => {
+  const answers: [RegExp, unknown][] = [
+    [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+    [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+  ];
+
+  it('resolves content unit and sub-unit names to ids', async () => {
+    const { http, calls } = routed(answers);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    await handlers.get('pbl_add_resource')!({
+      courseId: 'c1', contentUnit: 'Module One', subUnit: 'Lesson A',
+      title: 'Doc', type: 'LINK', url: 'https://x.test',
+    });
+
+    const post = calls.find((c) => c.method === 'POST' && c.path.endsWith('/resources'));
+    expect(post!.path).toBe(
+      'business/courses/c1/content-units/cu1/sub-content-units/su1/resources',
+    );
+  });
+
+  it('names the available sub-units when one does not match, without leaking an id', async () => {
+    const { http } = routed(answers);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_add_resource')!({
+      courseId: 'c1', contentUnit: 'Module One', subUnit: 'Nope',
+      title: 'Doc', type: 'LINK', url: 'https://x.test',
+    }).then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('Lesson A');
+    expect(err!.message).not.toContain('su1');
+  });
+});
+
+// Regression: pbl_publish and pbl_invite take a raw courseId and operate on
+// any course, session or not — they are escape hatches, not gate N of the
+// STEP_ORDER pipeline. Their live tools/list description strings used to say
+// "Gate 5"/"Gate 6" (stale even against the README, which had already moved
+// to 7/8 elsewhere) — pin that the number is gone rather than renumbered.
+describe('direct tool descriptions', () => {
+  it('carry no stale "Gate N" numbering', async () => {
+    const { http } = routed([]);
+    const server = new McpServer({ name: 'test', version: '0.0.0' });
+    const descriptions = new Map<string, string>();
+    (server as unknown as { tool: (...a: unknown[]) => unknown }).tool = (
+      ...args: unknown[]
+    ) => {
+      descriptions.set(args[0] as string, args[1] as string);
+      return undefined;
+    };
+    registerDirectTools(server, await directRuntime(http));
+
+    expect(descriptions.get('pbl_publish')).not.toMatch(/Gate \d/);
+    expect(descriptions.get('pbl_invite')).not.toMatch(/Gate \d/);
+  });
+});
+
+describe('pbl_publish — precondition', () => {
+  const publishCalled = (calls: RequestOpts[]) =>
+    calls.some((c) => c.path.endsWith('/publish'));
+
+  it('refuses when a content unit has no sub-units, naming it', async () => {
+    const { http, calls } = routed([
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units\/cu1\/sub-content-units\/su1\/skills$/, [{ coreCompetencyModelId: 'ccm1' }]],
+      [/content-units\/cu2\/sub-content-units$/, []],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }, { id: 'cu2', title: 'Module Two' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_publish')!({ courseId: 'c1' })
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('Module Two');
+    expect(err!.message).not.toContain('cu2');
+    expect(publishCalled(calls)).toBe(false);
+  });
+
+  it('refuses when a sub-unit has no skills, naming its content unit', async () => {
+    const { http, calls } = routed([
+      [/sub-content-units\/su1\/skills$/, []],
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_publish')!({ courseId: 'c1' })
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toMatch(/Module One.*no sub-content unit with a skill/s);
+    expect(publishCalled(calls)).toBe(false);
+  });
+
+  it('publishes when every content unit has a sub-unit with a skill', async () => {
+    const { http, calls } = routed([
+      [/sub-content-units\/su1\/skills$/, [{ coreCompetencyModelId: 'ccm1' }]],
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    await handlers.get('pbl_publish')!({ courseId: 'c1' });
+
+    expect(publishCalled(calls)).toBe(true);
   });
 });
