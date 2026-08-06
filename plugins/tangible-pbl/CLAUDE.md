@@ -6,7 +6,7 @@ Guidance for agents working on this plugin. Read this before changing anything.
 
 An MCP server (stdio) that authors a Problem-Based Learning course in the
 Tangible product from a single brief. It drives Tangible's business REST API
-directly and stops at **six human approval gates**. The Tangible web app is
+directly and stops at **eight human approval gates**. The Tangible web app is
 used only as a **viewer** — every gate returns a URL, never a browser action.
 
 Built in `tangible-internal-tools` across ten reviewed increments, then moved
@@ -94,6 +94,29 @@ debugging. Do not re-derive them by guessing.
    call identifies the shape. If you see that error, add the path it names to
    `COURSE_AT` or `ID_AT`; do not fix it at a single call site, or the next
    endpoint fails a gate later.
+9. **Sub-content units have no `generate` endpoint — they are authored, not
+   generated,** unlike skills, problems and content units. `estimatedDuration`
+   is in **minutes**, a positive integer, capped at 60000
+   (`estimatedDurationSchema`). Assigning a skill to a sub-unit needs **both**
+   `coreCompetencyModelId` and `levelId` — `CourseSkill.Level` is optional, so
+   a skill the backend returned with no level cannot be assigned; `planSubUnits`
+   in `src/session/detail-plan.ts` rejects it by name before any write. Ten
+   skills is the hard ceiling per sub-unit (`subContentUnitSkillUnderLimit`).
+   Creating a sub-unit, and assigning or changing its skills, both require the
+   course to already be in `DRAFT` (`courseIsDraft`) — the same gate
+   `content-units/generate` already put in front of everything past the
+   outline. Artifact `generate` 409s when one already exists for that
+   sub-unit; `regenerate` is a separate backend route that exists but this
+   server deliberately never calls. `sortOrder` is server-assigned
+   (`maxSortOrder + 1` on create) — never send one. Read from
+   `backend/src/routes/business/business-course-sub-content-unit.route.ts`,
+   `business-sub-content-unit-skill.route.ts`,
+   `business-course-artifact.route.ts`, and
+   `backend/src/validations/course-sub-content-unit.validation.ts`,
+   `course-artifact.validation.ts`, `schemas/course-sub-content-unit.schema.ts`
+   — items 1–8 above came from `api-docs`; this one didn't, so re-verify
+   against the routes and validations themselves, not `api-docs`, if the
+   backend changes.
 
 ## Working here
 
@@ -102,7 +125,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 200 tests
+npm test          # vitest run, 247 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -135,16 +158,6 @@ afterwards and confirm it passes.
 
 ## Known limitations and deferred work
 
-**Cannot publish yet.** The `detail` step is a deliberate no-op — it creates no
-sub-content units, and Tangible refuses to publish a course whose content units
-lack a sub-unit with a skill. `pbl_publish` returns the backend's own 400. The
-`detail` gate says so in its output. **This is the main follow-on: implement
-sub-content-unit creation, resources, and artifact generation.**
-
-**`pbl_add_resource` is currently undrivable** — nothing surfaces a
-`contentUnitId` or `subUnitId`, and nothing creates a sub-content unit. It will
-become usable when the `detail` layer lands.
-
 Ruled ship-as-is by the whole-branch review, worth tickets:
 
 - `resolve.ts`'s `resolveBusiness` and `machine.ts`'s `byName` are two drifted
@@ -166,15 +179,17 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## Never verified against a real backend
 
-**Nearly none of this has run against a live Tangible instance.** All 200 tests
+**Nearly none of this has run against a live Tangible instance.** All 247 tests
 use mocked HTTP. A first staging run reached course creation and found that
 `POST business/courses` does not return the course id where the client expects
 it — see item 8 below. The README's "Before you trust it" checklist is the smoke test,
 and it needs staging credentials that did not exist when this was built.
 
 Until someone walks a real brief through to the outline gate, treat the
-brief→context/skills mapping quality as **unknown**. That is the question that
-decides whether the `detail` layer is worth building.
+brief→context/skills mapping quality as **unknown**. That uncertainty was the
+reason the `detail` layer was next in line; it has since been built, but —
+like everything else in this section — it has not been run against a live
+backend either.
 
 ## Conventions
 
