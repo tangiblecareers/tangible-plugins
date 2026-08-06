@@ -9,6 +9,7 @@ import { AuthManager } from '../src/auth.js';
 import { CourseMemoryStore, type CourseMemory } from '../src/session/memory.js';
 import { reconcile } from '../src/session/reconcile.js';
 import { registerSessionTools } from '../src/tools/session.js';
+import { registerDirectTools } from '../src/tools/direct.js';
 import type { HttpClient, RequestOpts } from '../src/http.js';
 
 const CFG = loadConfig({
@@ -1430,5 +1431,119 @@ describe('pbl_status — breakdown listing', () => {
     expect(out).toContain('Module One');
     expect(out).toContain('Lesson A');
     expect(out).not.toMatch(/cu1|su1/);
+  });
+});
+
+/**
+ * `direct.ts`'s tools take a courseId directly, so these need no seeded memory —
+ * just a runtime whose http answers the reads each tool makes. `routed` maps a
+ * path fragment to a response and records every request.
+ */
+const routed = (answers: [RegExp, unknown][]) => {
+  const calls: RequestOpts[] = [];
+  const request = vi.fn(async (opts: RequestOpts) => {
+    calls.push(opts);
+    if (opts.path === 'auth/business/login' || opts.path === 'auth/login') {
+      return { token: 'biz', businessRole: 'ADMIN' };
+    }
+    for (const [re, body] of answers) if (re.test(opts.path)) return body;
+    return {};
+  });
+  return { http: { request } as unknown as HttpClient, calls };
+};
+
+const directRuntime = async (http: HttpClient): Promise<{ current: Runtime }> => {
+  const auth = new AuthManager(http, { email: 'a@b.c', password: 'pw' });
+  await auth.loginBusiness('b1', 'Acme');
+  return {
+    current: {
+      cfg: CFG, env: 'staging', appUrl: 'https://stage.app', http, auth,
+      store: new CourseMemoryStore('/tmp/unused-by-direct-tools'),
+    } as unknown as Runtime,
+  };
+};
+
+describe('pbl_add_resource — addressed by name', () => {
+  const answers: [RegExp, unknown][] = [
+    [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+    [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+  ];
+
+  it('resolves content unit and sub-unit names to ids', async () => {
+    const { http, calls } = routed(answers);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    await handlers.get('pbl_add_resource')!({
+      courseId: 'c1', contentUnit: 'Module One', subUnit: 'Lesson A',
+      title: 'Doc', type: 'LINK', url: 'https://x.test',
+    });
+
+    const post = calls.find((c) => c.method === 'POST' && c.path.endsWith('/resources'));
+    expect(post!.path).toBe(
+      'business/courses/c1/content-units/cu1/sub-content-units/su1/resources',
+    );
+  });
+
+  it('names the available sub-units when one does not match, without leaking an id', async () => {
+    const { http } = routed(answers);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_add_resource')!({
+      courseId: 'c1', contentUnit: 'Module One', subUnit: 'Nope',
+      title: 'Doc', type: 'LINK', url: 'https://x.test',
+    }).then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('Lesson A');
+    expect(err!.message).not.toContain('su1');
+  });
+});
+
+describe('pbl_publish — precondition', () => {
+  const publishCalled = (calls: RequestOpts[]) =>
+    calls.some((c) => c.path.endsWith('/publish'));
+
+  it('refuses when a content unit has no sub-units, naming it', async () => {
+    const { http, calls } = routed([
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units\/cu1\/sub-content-units\/su1\/skills$/, [{ coreCompetencyModelId: 'ccm1' }]],
+      [/content-units\/cu2\/sub-content-units$/, []],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }, { id: 'cu2', title: 'Module Two' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_publish')!({ courseId: 'c1' })
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('Module Two');
+    expect(err!.message).not.toContain('cu2');
+    expect(publishCalled(calls)).toBe(false);
+  });
+
+  it('refuses when a sub-unit has no skills, naming its content unit', async () => {
+    const { http, calls } = routed([
+      [/sub-content-units\/su1\/skills$/, []],
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    const err = await handlers.get('pbl_publish')!({ courseId: 'c1' })
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toMatch(/Module One.*no sub-content unit with a skill/s);
+    expect(publishCalled(calls)).toBe(false);
+  });
+
+  it('publishes when every content unit has a sub-unit with a skill', async () => {
+    const { http, calls } = routed([
+      [/sub-content-units\/su1\/skills$/, [{ coreCompetencyModelId: 'ccm1' }]],
+      [/content-units\/cu1\/sub-content-units$/, [{ id: 'su1', title: 'Lesson A' }]],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+    ]);
+    const handlers = captureHandlers(registerDirectTools, await directRuntime(http));
+
+    await handlers.get('pbl_publish')!({ courseId: 'c1' });
+
+    expect(publishCalled(calls)).toBe(true);
   });
 });

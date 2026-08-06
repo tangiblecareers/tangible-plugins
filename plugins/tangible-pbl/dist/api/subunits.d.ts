@@ -28,6 +28,7 @@ export declare const assignSkill: (http: HttpClient, auth: AuthManager, courseId
     coreCompetencyModelId: string;
     levelId: string;
 }) => Promise<unknown>;
+export declare const listSubUnitSkills: (http: HttpClient, auth: AuthManager, courseId: string, contentUnitId: string, subUnitId: string) => Promise<SubUnitSkill[]>;
 /** 409 when an artifact already exists — the caller treats that as satisfied. */
 export declare const generateArtifact: (http: HttpClient, auth: AuthManager, courseId: string, contentUnitId: string, subUnitId: string, body?: {
     instruction?: string;
