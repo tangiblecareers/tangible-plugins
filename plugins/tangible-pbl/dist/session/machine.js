@@ -1,6 +1,8 @@
 import { byName } from './by-name.js';
+import { planSubUnits } from './detail-plan.js';
 export const STEP_ORDER = [
-    'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+    'context', 'skills', 'problems', 'outline', 'detail', 'artifacts',
+    'publish', 'invite', 'done',
 ];
 /** Steps the backend freezes once content-units/generate flips the course to DRAFT. */
 const FROZEN_AFTER_OUTLINE = ['context', 'skills', 'problems'];
@@ -63,11 +65,74 @@ export const advance = async (deps, state, input = {}) => {
             const units = await deps.generateContentUnits(state.courseId);
             return done({ kind: 'outline', units });
         }
-        case 'detail':
-            // Sub-units, resources and artifacts are created un-gated by the tools
-            // layer; this step exists so the outline gate and the publish gate stay
-            // distinct in the ledger.
-            return done({ kind: 'none' });
+        case 'detail': {
+            if (!input.subUnits?.length) {
+                throw new Error('Pass subUnits to build the detail layer — each needs a contentUnit name, a ' +
+                    'title, and at least one skill name. Nothing is created until this call.');
+            }
+            // Resolve and validate the whole breakdown first. planSubUnits throws
+            // rather than resolving partially, so a bad name cannot leave half the
+            // sub-units created with no way to tell which.
+            const [units, course] = await Promise.all([
+                deps.listContentUnits(state.courseId),
+                deps.getCourse(state.courseId),
+            ]);
+            const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? []);
+            const created = [];
+            for (const r of plan) {
+                deps.onProgress?.(`Creating "${r.title}"…`);
+                const su = await deps.createSubUnit(state.courseId, r.contentUnitId, {
+                    title: r.title,
+                    ...(r.description !== undefined ? { description: r.description } : {}),
+                    ...(r.estimatedDuration !== undefined
+                        ? { estimatedDuration: r.estimatedDuration }
+                        : {}),
+                });
+                for (const skill of r.skills) {
+                    await deps.assignSkill(state.courseId, r.contentUnitId, su.id, {
+                        coreCompetencyModelId: skill.coreCompetencyModelId,
+                        levelId: skill.levelId,
+                    });
+                }
+                created.push({
+                    contentUnitTitle: r.contentUnitTitle,
+                    title: r.title,
+                    skills: r.skills.map((s) => s.name),
+                });
+            }
+            return done({ kind: 'detail', created });
+        }
+        case 'artifacts': {
+            const units = await deps.listContentUnits(state.courseId);
+            const generated = [];
+            const failed = [];
+            for (const unit of units) {
+                for (const sub of await deps.listSubUnits(state.courseId, unit.id)) {
+                    deps.onProgress?.(`Generating the artifact for "${sub.title}"…`);
+                    try {
+                        await deps.generateArtifact(state.courseId, unit.id, sub.id, {
+                            ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
+                        });
+                        generated.push(sub.title);
+                    }
+                    catch (err) {
+                        // 409 means an artifact already exists, which satisfies the goal of
+                        // "every sub-unit has one" — regenerating is a separate decision.
+                        if (err.status === 409) {
+                            generated.push(sub.title);
+                            continue;
+                        }
+                        // Carry on: aborting here would discard every generation that
+                        // already succeeded, and there is no way to resume mid-gate.
+                        failed.push({
+                            title: sub.title,
+                            reason: err instanceof Error ? err.message : String(err),
+                        });
+                    }
+                }
+            }
+            return done({ kind: 'artifacts', generated, failed });
+        }
         case 'publish': {
             deps.onProgress?.('Publishing…');
             await deps.publish(state.courseId);

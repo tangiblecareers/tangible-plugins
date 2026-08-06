@@ -1,5 +1,5 @@
 import type { Env } from '../config.js';
-export type Step = 'context' | 'skills' | 'problems' | 'outline' | 'detail' | 'publish' | 'invite' | 'done';
+export type Step = 'context' | 'skills' | 'problems' | 'outline' | 'detail' | 'artifacts' | 'publish' | 'invite' | 'done';
 export type CourseStatusLabel = 'active' | 'closed' | 'published';
 /**
  * One authored course. `id` is the slug, which is also the filename stem — it

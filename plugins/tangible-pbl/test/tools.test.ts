@@ -1269,3 +1269,166 @@ describe('pbl_abort — unreadable memory file', () => {
     expect((await rtHolder.current.store.load('staging', 'fine')).status).toBe('closed');
   });
 });
+
+describe('pbl_approve — detail and artifacts gates', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-detail-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /** Records every request and answers the reads each gate makes. */
+  const gateHttp = (answers: [RegExp, unknown][]) => {
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      for (const [re, body] of answers) if (re.test(opts.path)) return body;
+      return {};
+    });
+    return { http: { request } as unknown as HttpClient, calls };
+  };
+
+  const seed = async (store: CourseMemoryStore, step: 'outline' | 'detail') =>
+    store.save({
+      id: 's1', title: 'A course', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step, awaitingApproval: true,
+      status: 'active', created: '2026-08-06T10:00:00.000Z',
+      updated: '2026-08-06T10:00:00.000Z',
+    } as CourseMemory);
+
+  it('creates the breakdown and logs it by name, with no id in the output', async () => {
+    const { http } = gateHttp([
+      [/^business\/courses\/c1$/, {
+        id: 'c1', status: 'DRAFT',
+        CourseSkills: [{
+          id: 'cs1', isSelected: true,
+          CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+          Level: { id: 'lvl1', name: 'Foundational' },
+        }],
+      }],
+      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+      [/sub-content-units$/, { id: 'su1', title: 'Lesson A' }],
+    ]);
+    const rtHolder = { current: await makeRuntime(http, root) };
+    await seed(rtHolder.current.store, 'outline');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_approve')!({
+      sessionId: 's1',
+      subUnits: [{
+        contentUnit: 'Module One', title: 'Lesson A', minutes: 45,
+        skills: ['Visual Hierarchy'],
+      }],
+    });
+
+    const out = result.content[0].text;
+    expect(out).toContain('Module One › Lesson A');
+    expect(out).toContain('Visual Hierarchy');
+    expect(out).not.toMatch(/cu1|su1|ccm1|lvl1/);
+
+    const file = await readFile(join(root, 'staging', 's1.md'), 'utf8');
+    expect(file).toContain('Lesson A');
+    expect(file).not.toMatch(/cu1|su1|ccm1|lvl1/);
+    expect((await rtHolder.current.store.load('staging', 's1')).step).toBe('detail');
+  });
+
+  it('reports an artifact failure and still advances the gate', async () => {
+    let generateCalls = 0;
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path.endsWith('/artifact/generate')) {
+        generateCalls += 1;
+        if (generateCalls === 1) throw new Error('upstream exploded');
+        return {};
+      }
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }, { id: 'su2', title: 'Lesson B' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      return {};
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seed(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_approve')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    // Both were attempted: aborting on the first failure would have discarded
+    // the second generation with no way to resume mid-gate.
+    expect(generateCalls).toBe(2);
+    expect(out).toContain('1 generated');
+    expect(out).toContain('Lesson A — upstream exploded');
+    expect((await rtHolder.current.store.load('staging', 's1')).step).toBe('artifacts');
+  });
+});
+
+describe('pbl_status — breakdown listing', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-status-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAt = async (store: CourseMemoryStore, step: CourseMemory['step']) =>
+    store.save({
+      id: 's1', title: 'A course', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step, awaitingApproval: true,
+      status: 'active', created: '2026-08-06T10:00:00.000Z',
+      updated: '2026-08-06T10:00:00.000Z',
+    } as CourseMemory);
+
+  it('does not call content-units/sub-units for a course that has not reached "detail"', async () => {
+    const calls: RequestOpts[] = [];
+    const request = vi.fn(async (opts: RequestOpts) => {
+      calls.push(opts);
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      // Any content-units or sub-content-units call is exactly what a
+      // pre-"detail" session must not pay for — fail loudly if it happens.
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'context');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+
+    expect(result.content[0].text).not.toContain('Breakdown:');
+    expect(calls.some((c) => /content-units/.test(c.path))).toBe(false);
+  });
+
+  it('lists content units and their sub-units by name, with no id, once "detail" is reached', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Breakdown:');
+    expect(out).toContain('Module One');
+    expect(out).toContain('Lesson A');
+    expect(out).not.toMatch(/cu1|su1/);
+  });
+});

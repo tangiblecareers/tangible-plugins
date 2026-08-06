@@ -20,6 +20,17 @@ const renderProduced = (produced) => {
             return produced.units.length === 0
                 ? 'No content units were generated.'
                 : ['Outline:', ...produced.units.map((u, i) => `  ${i + 1}. ${u.title}`)].join('\n');
+        case 'detail':
+            return produced.created.length === 0
+                ? 'No sub-content units were created.'
+                : ['Sub-content units:', ...produced.created.map((c) => `  ${c.contentUnitTitle} › ${c.title} [${c.skills.join(', ')}]`)].join('\n');
+        case 'artifacts': {
+            const lines = [`Artifacts: ${produced.generated.length} generated.`];
+            if (produced.failed.length > 0) {
+                lines.push(`${produced.failed.length} failed:`, ...produced.failed.map((f) => `  ${f.title} — ${f.reason}`));
+            }
+            return lines.join('\n');
+        }
         case 'published':
             return 'Course published.';
         case 'invited':
@@ -36,20 +47,11 @@ export const renderGate = (state, opts) => {
     const next = upcoming === 'done'
         ? 'Nothing further — call pbl_abort to close the session.'
         : `Next: ${upcoming}. Call pbl_approve to continue, or pbl_revise to change this step.`;
-    // Sub-content units don't exist yet (see README, "Current limitations"), so
-    // pbl_publish will 400 no matter how far the ledger says the session has
-    // come. Say so here — this gate response is the only surface an operator
-    // actually reads.
-    const detailLimitation = state.step === 'detail'
-        ? 'No sub-content units are created yet — `pbl_publish` will return a backend ' +
-            '400 until the detail layer lands. See README, "Current limitations".'
-        : '';
     return [
         banner,
         renderLedger(state),
         '',
         renderProduced(opts.produced),
-        detailLimitation,
         '',
         `Review: ${courseUrl(opts.appUrl, state.courseId)}`,
         next,
