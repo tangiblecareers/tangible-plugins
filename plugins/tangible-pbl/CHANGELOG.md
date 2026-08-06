@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.2.1...tangible-pbl-v0.3.0) (2026-08-06)
+
+
+### Features
+
+* **tangible-pbl:** add the sub-content-unit, skill and artifact API ([50cd9dd](https://github.com/tangiblecareers/tangible-plugins/commit/50cd9dd27604947c27768d1fab5e87c308dd07f6))
+* **tangible-pbl:** address resources by name and guard publish on its precondition ([dc757cc](https://github.com/tangiblecareers/tangible-plugins/commit/dc757cc488bdfa144988d151ffc4ee14663a335a))
+* **tangible-pbl:** create sub-content units and assign skills at the detail gate ([8d3e7b5](https://github.com/tangiblecareers/tangible-plugins/commit/8d3e7b5d51dac582f09ee37198c2e2caead41769))
+* **tangible-pbl:** drive the detail and artifacts gates from the tools layer ([7f81449](https://github.com/tangiblecareers/tangible-plugins/commit/7f81449498a45e926a322abcfd37ca69296110c9))
+* **tangible-pbl:** generate artifacts at their own gate ([fc553d3](https://github.com/tangiblecareers/tangible-plugins/commit/fc553d3277098ec1cc422060d9b0ab094856c092))
+* **tangible-pbl:** validate and resolve a sub-unit breakdown before any write ([a3a022c](https://github.com/tangiblecareers/tangible-plugins/commit/a3a022c63cd4f820c16564846a767da2dde60af1))
+
+
+### Bug Fixes
+
+* **tangible-pbl:** close six review-flagged gaps in the detail and artifacts gates ([93dd0ea](https://github.com/tangiblecareers/tangible-plugins/commit/93dd0ea16116a236aed6f9586e08732e936dd536))
+* **tangible-pbl:** redact UUIDs from backend error messages at the source ([d199d36](https://github.com/tangiblecareers/tangible-plugins/commit/d199d3637a650ad292774ae8fefb546f8ff59b2c))
+
 ## [0.2.1](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.2.0...tangible-pbl-v0.2.1) (2026-08-06)
 
 
