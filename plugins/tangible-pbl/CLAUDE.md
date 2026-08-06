@@ -82,11 +82,18 @@ debugging. Do not re-derive them by guessing.
 8. **Responses are wrapped in a `payload` envelope**, and `http.ts` unwraps it
    for every call. This assumption had never been tested against a real
    response: the first staging run created a course whose `payload` was truthy
-   but carried no `id`, so `courseId` came back `undefined`. `request()` now
-   throws when a body has no `payload` key, naming the keys it did have. **The
-   actual shape of the `POST business/courses` response is still unconfirmed** —
-   `scripts/probe-create-shape.mjs` prints it in one run against staging. Until
-   someone runs it, `pbl_start_course` cannot complete against a live backend.
+   but carried no `id`, so every following call went to
+   `business/courses/undefined/...`. `request()` now throws when a body has no
+   `payload` key at all, naming the keys it did have.
+   **The course object's own shape inside that envelope is still unconfirmed.**
+   Rather than pin one key, `asCourse()` in `src/api/builder.ts` looks for
+   `id`/`courseId`/`uuid`/`_id` on the payload and on `.course`/`.Course`/
+   `.data`/`.courseData`, and every course-returning endpoint goes through it
+   via `courseCall`. When none match it throws naming the keys actually
+   present, nested one level — **the error is the diagnostic**, so one failed
+   call identifies the shape. If you see that error, add the path it names to
+   `COURSE_AT` or `ID_AT`; do not fix it at a single call site, or the next
+   endpoint fails a gate later.
 
 ## Working here
 
@@ -95,7 +102,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 186 tests
+npm test          # vitest run, 200 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -159,7 +166,7 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## Never verified against a real backend
 
-**Nearly none of this has run against a live Tangible instance.** All 186 tests
+**Nearly none of this has run against a live Tangible instance.** All 200 tests
 use mocked HTTP. A first staging run reached course creation and found that
 `POST business/courses` does not return the course id where the client expects
 it — see item 8 below. The README's "Before you trust it" checklist is the smoke test,

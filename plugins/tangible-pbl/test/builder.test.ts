@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  asCourse,
   createCourse, getCourse, addContext, selectContext, generateSkills, selectSkill,
   generateProblems, selectProblem, generateContentUnits, listContentUnits,
 } from '../src/api/builder.js';
@@ -15,7 +16,7 @@ const ready = async () => {
   return auth;
 };
 
-const spyHttp = (result: unknown = {}) => {
+const spyHttp = (result: unknown = { id: 'c1', status: 'INITIALIZING' }) => {
   const request = vi.fn().mockResolvedValue(result);
   return { http: { request } as unknown as HttpClient, request };
 };
@@ -148,5 +149,77 @@ describe('builder', () => {
       token: 'biz',
       body: values,
     });
+  });
+});
+
+/**
+ * Regression: a live staging run created a course whose payload was truthy but
+ * carried no `id`, so `course.id` was undefined and every following call went
+ * to `business/courses/undefined/...`. Three attempts died there.
+ */
+describe('asCourse — resolving the course id from an undocumented shape', () => {
+  it('finds the id on a bare course object', () => {
+    expect(asCourse({ id: 'c1', status: 'INITIALIZING' }, 'x').id).toBe('c1');
+  });
+
+  it.each([
+    ['course', { course: { id: 'c1', status: 'INITIALIZING' } }],
+    ['Course', { Course: { id: 'c1', status: 'INITIALIZING' } }],
+    ['data', { data: { id: 'c1', status: 'INITIALIZING' } }],
+    ['courseData', { courseData: { id: 'c1', status: 'INITIALIZING' } }],
+  ])('finds a course nested under .%s', (_name, payload) => {
+    expect(asCourse(payload, 'x').id).toBe('c1');
+  });
+
+  it.each(['courseId', 'uuid', '_id'])('accepts %s as the id field', (key) => {
+    expect(asCourse({ [key]: 'c1', status: 'INITIALIZING' }, 'x').id).toBe('c1');
+  });
+
+  it('carries the rest of the course through, not just the id', () => {
+    const c = asCourse(
+      { course: { id: 'c1', title: 'Intro', status: 'DRAFT', CourseContexts: [{ id: 'x' }] } },
+      'x',
+    );
+    expect(c.title).toBe('Intro');
+    expect(c.status).toBe('DRAFT');
+    expect(c.CourseContexts).toEqual([{ id: 'x' }]);
+  });
+
+  it('rejects an empty-string id rather than passing it downstream', () => {
+    // '' is falsy but would still build `business/courses//course-contexts`.
+    expect(() => asCourse({ id: '', status: 'INITIALIZING' }, 'x')).toThrow(/no course id/);
+  });
+
+  it('names the keys it actually got, nested one level, so the shape is identifiable', () => {
+    const err = (() => {
+      try {
+        asCourse({ result: { name: 'Intro', slug: 'intro' }, meta: 1 }, 'POST business/courses');
+        return undefined;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(err!.message).toContain('POST business/courses');
+    // The nested map is the whole point — a flat key list would not tell you
+    // where the course actually lives.
+    expect(err!.message).toContain('result{name,slug}');
+    expect(err!.message).toContain('meta');
+  });
+
+  it('throws on a payload that is not an object at all', () => {
+    expect(() => asCourse(undefined, 'x')).toThrow(/no course id/);
+    expect(() => asCourse('nope', 'x')).toThrow(/no course id/);
+  });
+
+  it('createCourse resolves a wrapped payload end to end', async () => {
+    const { http } = spyHttp({ course: { id: 'c1', status: 'INITIALIZING' } });
+    await expect(createCourse(http, await ready(), 'brief')).resolves.toMatchObject({ id: 'c1' });
+  });
+
+  it('createCourse throws naming the route when the id is missing', async () => {
+    const { http } = spyHttp({ result: { name: 'Intro' } });
+    await expect(createCourse(http, await ready(), 'brief')).rejects.toThrow(
+      /POST business\/courses: no course id/,
+    );
   });
 });
