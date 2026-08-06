@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.2.0...tangible-pbl-v0.2.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **tangible-pbl:** resolve the course id wherever the API puts it ([9a34c23](https://github.com/tangiblecareers/tangible-plugins/commit/9a34c232f0f69e41657ef65e266c245ab33b6710))
+
 ## [0.2.0](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.1.0...tangible-pbl-v0.2.0) (2026-08-06)
 
 
