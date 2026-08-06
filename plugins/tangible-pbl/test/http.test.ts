@@ -103,6 +103,23 @@ describe('createHttpClient', () => {
       /502/,
     );
   });
+
+  // Regression: the backend's own error body can embed a course/sub-unit id
+  // directly in `message` — e.g. a not-found or duplicate-resource error.
+  // errorMessage() returns that text verbatim, so the id must be scrubbed
+  // before it ever reaches a TangibleApiError, not left to each call site.
+  it('redacts a UUID embedded in the backend error message', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      json({ message: 'Course 8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a not found' }, 404),
+    );
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    const err = await http
+      .request({ method: 'GET', path: 'x' })
+      .catch((e: unknown) => e as TangibleApiError);
+    expect(err).toBeInstanceOf(TangibleApiError);
+    expect(err.message).toContain('not found');
+    expect(err.message).not.toContain('8f14e45f');
+  });
 });
 
 /**
