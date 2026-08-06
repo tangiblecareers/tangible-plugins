@@ -27,7 +27,7 @@ export const registerDirectTools = (server, rt) => {
         await addResource(current.http, current.auth, courseId, unit.id, sub.id, values);
         return text(`${banner(current)}\nAdded resource "${values.title}" to "${sub.title}".`);
     });
-    server.tool('pbl_publish', 'Publish a DRAFT course. Gate 5 — learners can see it afterwards.', { courseId: z.string() }, async ({ courseId }) => {
+    server.tool('pbl_publish', 'Publish a DRAFT course — learners can see it afterwards.', { courseId: z.string() }, async ({ courseId }) => {
         const current = rt.current;
         // Tangible refuses to publish a course whose content units lack a
         // sub-unit with a skill. Check locally and name the gaps rather than
@@ -58,7 +58,7 @@ export const registerDirectTools = (server, rt) => {
         await publishCourse(current.http, current.auth, courseId);
         return text(`${banner(current)}\nPublished.\n${courseUrl(current.appUrl, courseId)}`);
     });
-    server.tool('pbl_invite', 'Invite learners by email. Gate 6 — this sends real mail and cannot be undone.', { courseId: z.string(), emails: z.array(z.string().email()).min(1) }, async ({ courseId, emails }) => {
+    server.tool('pbl_invite', 'Invite learners by email — this sends real mail and cannot be undone.', { courseId: z.string(), emails: z.array(z.string().email()).min(1) }, async ({ courseId, emails }) => {
         const current = rt.current;
         await sendInvitations(current.http, current.auth, courseId, emails);
         return text(`${banner(current)}\nInvited ${emails.length} learner${emails.length === 1 ? '' : 's'}.`);

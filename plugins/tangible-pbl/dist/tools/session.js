@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { createCourse, generateContentUnits, generateProblems, generateSkills, getCourse, listContentUnits, selectContext, selectProblem, selectSkill, addContext, } from '../api/builder.js';
-import { createSubUnit, listSubUnits, assignSkill, generateArtifact, } from '../api/subunits.js';
+import { createSubUnit, listSubUnits, listSubUnitSkills, assignSkill, generateArtifact, } from '../api/subunits.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
 import { advance, assertRevisable, STEP_ORDER, } from '../session/machine.js';
-import { renderGate, renderLedger } from '../session/ledger.js';
+import { renderGate, renderLedger, renderBreakdown } from '../session/ledger.js';
 import { reconcile, renderResume } from '../session/reconcile.js';
 import { resolveBusiness } from '../resolve.js';
 import { text } from './render.js';
@@ -210,17 +210,21 @@ export const registerSessionTools = (server, rt) => {
         let breakdown = '';
         if (detailReached) {
             const units = await listContentUnits(current.http, current.auth, state.courseId);
-            const lines = [];
+            const breakdownUnits = [];
             for (const u of units) {
-                lines.push(u.title);
-                for (const s of await listSubUnits(current.http, current.auth, state.courseId, u.id)) {
-                    lines.push(`  ${s.title}`);
+                const subs = await listSubUnits(current.http, current.auth, state.courseId, u.id);
+                const subEntries = [];
+                for (const s of subs) {
+                    const skills = await listSubUnitSkills(current.http, current.auth, state.courseId, u.id, s.id);
+                    subEntries.push({ title: s.title, skills });
                 }
+                breakdownUnits.push({ title: u.title, subs: subEntries });
             }
-            // Names only — pbl_add_resource takes these, so this listing is what
-            // makes that tool reachable at all.
-            if (lines.length > 0)
-                breakdown = `\n\nBreakdown:\n${lines.join('\n')}`;
+            // Names (and, per sub-unit, skill names) only — pbl_add_resource
+            // takes these, so this listing is what makes that tool reachable at
+            // all, and is how an operator confirms the detail gate did what they
+            // approved before running pbl_publish.
+            breakdown = renderBreakdown(breakdownUnits);
         }
         return text(renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) + breakdown);
     });

@@ -19,7 +19,19 @@ export const planSubUnits = (specs, units, courseSkills) => {
         throw new Error('Pass at least one sub-content unit to create.');
     }
     const selected = courseSkills.filter((s) => s.isSelected);
-    return specs.map((s) => {
+    // If every selected skill lacks a level, this is almost certainly the
+    // client misreading the response shape rather than genuine course data —
+    // see asCourse in src/api/builder.ts for the house style this follows.
+    // Blaming individual skills (the per-skill message below) sends an
+    // operator through every skill in the course before suspecting the client.
+    if (selected.length > 0 && selected.every((s) => !s.Level?.id)) {
+        throw new Error(`None of the ${selected.length} selected skills carries a level, and assigning a ` +
+            `skill to a sub-content unit requires one. This is almost certainly a response-shape ` +
+            `mismatch rather than course data — the client reads it from CourseSkill.Level.id. ` +
+            `Keys actually present on a selected skill: ${Object.keys(selected[0]).join(', ')}. ` +
+            `Report this shape.`);
+    }
+    const resolved = specs.map((s) => {
         const title = s.title?.trim() ?? '';
         if (title.length === 0) {
             throw new Error(`Every sub-content unit needs a title (under "${s.contentUnit}").`);
@@ -62,4 +74,21 @@ export const planSubUnits = (specs, units, courseSkills) => {
             skills,
         };
     });
+    // A duplicate title under one content unit is accepted here and created on
+    // the backend, but pbl_add_resource resolves a sub-unit by name — a second
+    // "Intro" makes that lookup permanently ambiguous, and there is no rename,
+    // delete or reorder route to fix it afterwards. Only collisions introduced
+    // by this one breakdown are checked; an existing sub-unit with the same
+    // title is a separate (and separately recoverable) problem.
+    const seen = new Set();
+    for (const r of resolved) {
+        const key = `${r.contentUnitId}::${r.title.trim().toLowerCase()}`;
+        if (seen.has(key)) {
+            throw new Error(`"${r.contentUnitTitle}" has two sub-content units named "${r.title}". Titles must be ` +
+                `unique within a content unit — pbl_add_resource resolves a sub-unit by name, and ` +
+                `there is no way to rename one after it is created.`);
+        }
+        seen.add(key);
+    }
+    return resolved;
 };

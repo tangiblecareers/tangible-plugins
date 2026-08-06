@@ -307,6 +307,80 @@ describe('advance to detail', () => {
   });
 });
 
+describe('advance to detail — partial failure mid-loop', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const threeSkills = [
+    {
+      id: 'cs1', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+      Level: { id: 'lvl1', name: 'Foundational' },
+    },
+    {
+      id: 'cs2', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm2', name: 'Typography' },
+      Level: { id: 'lvl2', name: 'Foundational' },
+    },
+    {
+      id: 'cs3', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm3', name: 'Critique' },
+      Level: { id: 'lvl3', name: 'Foundational' },
+    },
+  ];
+
+  const input = {
+    subUnits: [
+      { contentUnit: 'Module One', title: 'Lesson A', skills: ['Visual Hierarchy'] },
+      { contentUnit: 'Module One', title: 'Lesson B', skills: ['Typography'] },
+      { contentUnit: 'Module One', title: 'Lesson C', skills: ['Critique'] },
+    ],
+  };
+
+  const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: threeSkills }),
+    assignSkill: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  it('reports exactly what landed, warns about resending, and preserves the cause', async () => {
+    let calls = 0;
+    const d = detailDeps({
+      createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) => {
+        calls += 1;
+        if (calls === 3) return Promise.reject(new Error('upstream exploded'));
+        return Promise.resolve({ id: `su-${v.title}`, title: v.title });
+      }),
+    });
+
+    const err = await advance(d, state({ step: 'outline' }), input)
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err).toBeDefined();
+    expect(err!.message).toContain('2 of 3');
+    expect(err!.message).toContain('Module One › Lesson A');
+    expect(err!.message).toContain('Module One › Lesson B');
+    // Lesson C never landed — it must not be listed as though it did.
+    expect(err!.message).not.toContain('Lesson C');
+    expect(err!.message).toMatch(/duplicate/i);
+    expect(err!.message).toContain('upstream exploded');
+    expect((err as unknown as { cause?: unknown }).cause).toBeInstanceOf(Error);
+  });
+
+  it('reports 0 of N when the very first creation fails', async () => {
+    const d = detailDeps({
+      createSubUnit: vi.fn().mockRejectedValue(new Error('nope')),
+    });
+
+    const err = await advance(d, state({ step: 'outline' }), input)
+      .then(() => undefined, (e: Error) => e);
+
+    expect(err!.message).toContain('0 of 3');
+    expect(err!.message).toContain('(none)');
+    expect(err!.message).not.toContain('Lesson A');
+  });
+});
+
 describe('advance to artifacts', () => {
   const units = [{ id: 'cu1', title: 'Module One' }];
   const subs = [{ id: 'su1', title: 'Lesson A' }, { id: 'su2', title: 'Lesson B' }];
@@ -377,6 +451,30 @@ describe('advance to artifacts', () => {
     expect(d.generateArtifact).toHaveBeenCalledTimes(2);
     expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).generated).toEqual([]);
     expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).failed).toHaveLength(2);
+  });
+
+  // asArray (subunits.ts) returns [] silently for a listSubUnits response
+  // shaped unexpectedly — not changed here, that's pinned separately in
+  // test/subunits.test.ts. But if that silence reaches this gate unchecked,
+  // it advances having generated nothing, and every downstream symptom
+  // (pbl_publish's false "has no sub-content units", an empty pbl_status)
+  // points away from the real cause. Content units exist here; sub-units
+  // just never came back.
+  it('refuses to advance on a vacuous run — content units exist but no sub-units were found', async () => {
+    const d = artifactDeps({ listSubUnits: vi.fn().mockResolvedValue([]) });
+    await expect(advance(d, state({ step: 'detail' }), {}))
+      .rejects.toThrow(/no sub-units.*content unit.*pbl_status/is);
+    expect(d.generateArtifact).not.toHaveBeenCalled();
+  });
+
+  it('advances normally when there are no content units at all — nothing to generate is not vacuous', async () => {
+    const d = artifactDeps({
+      listContentUnits: vi.fn().mockResolvedValue([]),
+      listSubUnits: vi.fn(),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(produced).toEqual({ kind: 'artifacts', generated: [], failed: [] });
+    expect(d.listSubUnits).not.toHaveBeenCalled();
   });
 
   // Regression: a TangibleApiError's message is the backend's own free text,

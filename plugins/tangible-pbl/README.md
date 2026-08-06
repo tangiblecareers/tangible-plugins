@@ -177,8 +177,8 @@ behavior on those two categories.
 |---|---|
 | `pbl_open_in_app` | Return the Tangible app URL for a course, for eyes-on review. |
 | `pbl_add_resource` | Attach a link or text resource to a sub-content unit. |
-| `pbl_publish` | Publish a DRAFT course — checks locally first and names which content units are still missing a sub-unit with a skill, instead of surfacing Tangible's bare 400. Gate 7 — learners can see it afterwards. |
-| `pbl_invite` | Invite learners by email. Gate 8 — this sends real mail and cannot be undone. |
+| `pbl_publish` | Publish a DRAFT course — checks locally first and names which content units are still missing a sub-unit with a skill, instead of surfacing Tangible's bare 400. Learners can see it afterwards. |
+| `pbl_invite` | Invite learners by email — this sends real mail and cannot be undone. |
 
 `pbl_add_resource` takes `contentUnit` and `subUnit` **names**, not ids —
 resolved with the same exact→prefix→ambiguity `byName` lookup used

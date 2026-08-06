@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderLedger, renderGate, courseUrl } from '../src/session/ledger.js';
+import { renderLedger, renderGate, courseUrl, renderBreakdown } from '../src/session/ledger.js';
 import type { CourseMemory } from '../src/session/memory.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
@@ -242,5 +242,69 @@ describe('renderGate', () => {
     expect(out).toContain('Artifacts: 1 generated.');
     expect(out).toContain('1 failed:');
     expect(out).toContain('Lesson B — upstream exploded');
+  });
+});
+
+describe('renderBreakdown', () => {
+  it('lists content units and sub-units, with named skills in brackets', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [
+          { title: 'Lesson A', skills: [{ coreCompetencyModelId: 'ccm1', name: 'Visual Hierarchy' }] },
+        ],
+      },
+    ]);
+    expect(out).toContain('Module One');
+    expect(out).toContain('Lesson A [Visual Hierarchy]');
+    expect(out).not.toContain('ccm1');
+  });
+
+  it('renders a sub-unit with no skills as just its title', () => {
+    const out = renderBreakdown([
+      { title: 'Module One', subs: [{ title: 'Lesson A', skills: [] }] },
+    ]);
+    expect(out).toContain('Lesson A');
+    expect(out).not.toContain('[');
+  });
+
+  // Regression guard: SubUnitSkill.name is optional — the backend can return
+  // a skill with only a bare coreCompetencyModelId. Rendering that id would
+  // be a UUID leak. The fixture below makes the forbidden id reachable (the
+  // skill genuinely has no name), so this test actually exercises the
+  // fallback rather than passing vacuously — see CLAUDE.md's testing lessons
+  // on why a reachable fixture is required for a negative assertion to mean
+  // anything.
+  it('never renders a bare coreCompetencyModelId — falls back to a skill count', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [{ title: 'Lesson A', skills: [{ coreCompetencyModelId: 'ccm-secret-uuid' }] }],
+      },
+    ]);
+    expect(out).toContain('Lesson A (1 skill)');
+    expect(out).not.toContain('ccm-secret-uuid');
+  });
+
+  it('falls back to a count for the whole sub-unit when only some of its skills are named', () => {
+    const out = renderBreakdown([
+      {
+        title: 'Module One',
+        subs: [{
+          title: 'Lesson A',
+          skills: [
+            { coreCompetencyModelId: 'ccm1', name: 'Visual Hierarchy' },
+            { coreCompetencyModelId: 'ccm-secret-uuid' },
+          ],
+        }],
+      },
+    ]);
+    expect(out).toContain('Lesson A (2 skills)');
+    expect(out).not.toContain('ccm-secret-uuid');
+    expect(out).not.toContain('Visual Hierarchy');
+  });
+
+  it('returns an empty string for no content units, so pbl_status appends nothing', () => {
+    expect(renderBreakdown([])).toBe('');
   });
 });

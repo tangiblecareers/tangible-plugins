@@ -79,26 +79,45 @@ export const advance = async (deps, state, input = {}) => {
             ]);
             const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? []);
             const created = [];
-            for (const r of plan) {
-                deps.onProgress?.(`Creating "${r.title}"…`);
-                const su = await deps.createSubUnit(state.courseId, r.contentUnitId, {
-                    title: r.title,
-                    ...(r.description !== undefined ? { description: r.description } : {}),
-                    ...(r.estimatedDuration !== undefined
-                        ? { estimatedDuration: r.estimatedDuration }
-                        : {}),
-                });
-                for (const skill of r.skills) {
-                    await deps.assignSkill(state.courseId, r.contentUnitId, su.id, {
-                        coreCompetencyModelId: skill.coreCompetencyModelId,
-                        levelId: skill.levelId,
+            try {
+                for (const r of plan) {
+                    deps.onProgress?.(`Creating "${r.title}"…`);
+                    const su = await deps.createSubUnit(state.courseId, r.contentUnitId, {
+                        title: r.title,
+                        ...(r.description !== undefined ? { description: r.description } : {}),
+                        ...(r.estimatedDuration !== undefined
+                            ? { estimatedDuration: r.estimatedDuration }
+                            : {}),
+                    });
+                    for (const skill of r.skills) {
+                        await deps.assignSkill(state.courseId, r.contentUnitId, su.id, {
+                            coreCompetencyModelId: skill.coreCompetencyModelId,
+                            levelId: skill.levelId,
+                        });
+                    }
+                    created.push({
+                        contentUnitTitle: r.contentUnitTitle,
+                        title: r.title,
+                        skills: r.skills.map((s) => s.name),
                     });
                 }
-                created.push({
-                    contentUnitTitle: r.contentUnitTitle,
-                    title: r.title,
-                    skills: r.skills.map((s) => s.name),
-                });
+            }
+            catch (err) {
+                // The spec accepted partial creation on the condition that the gate
+                // reports exactly what landed. Without this, `created` is discarded
+                // with the stack frame, state.step stays 'outline', and the natural
+                // response — re-running pbl_approve with the same breakdown —
+                // duplicates entries 1..created.length, which (combined with the
+                // duplicate-title check above) permanently breaks pbl_add_resource
+                // for them. Still throws: partial success is not success.
+                const landed = created
+                    .map((c) => `  ${c.contentUnitTitle} › ${c.title}`)
+                    .join('\n');
+                throw new Error(`Created ${created.length} of ${plan.length} sub-content units before this failed:\n` +
+                    `${landed.length > 0 ? landed : '  (none)'}\n` +
+                    `Re-running pbl_approve with this breakdown would duplicate the ones listed above ` +
+                    `— resend only the entries that are not listed. Underlying error: ` +
+                    `${err instanceof Error ? err.message : String(err)}`, { cause: err });
             }
             return done({ kind: 'detail', created });
         }
@@ -130,6 +149,20 @@ export const advance = async (deps, state, input = {}) => {
                         });
                     }
                 }
+            }
+            // asArray (subunits.ts) returns [] silently for an unrecognised list
+            // shape — deliberately, and not changed here. But that silence means a
+            // wrongly-shaped response and "the detail gate created nothing" are
+            // indistinguishable from generated:[]/failed:[] alone, and this gate
+            // would otherwise advance having done nothing: pbl_publish then reports
+            // "has no sub-content units" (false — sub-units may well exist),
+            // pbl_status shows nothing, and none of that points at the real cause.
+            // Refuse to advance on this vacuous case instead.
+            if (units.length > 0 && generated.length === 0 && failed.length === 0) {
+                throw new Error(`No sub-units were found under any of the ${units.length} content unit` +
+                    `${units.length === 1 ? '' : 's'}. Either the detail gate created nothing, or the ` +
+                    `sub-unit list response is not shaped the way listSubUnits expects. Run pbl_status ` +
+                    `to see the breakdown before retrying.`);
             }
             return done({ kind: 'artifacts', generated, failed });
         }
