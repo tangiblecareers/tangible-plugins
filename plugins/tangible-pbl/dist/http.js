@@ -40,10 +40,13 @@ const errorMessage = (body, status) => {
 };
 /**
  * Course and business ids are UUIDs, and this codebase does not surface a UUID
- * in any output — including error messages. Route shape is still useful, so
- * keep the path and replace only the id segments.
+ * in any output — including error messages. The pattern has no anchoring to
+ * path separators, so it scrubs a UUID wherever one appears: in a route
+ * segment, or embedded in a backend's own free-text error message (e.g.
+ * "Course <uuid> not found"). Everything else in the string — the route
+ * shape, or the human-readable reason — passes through untouched.
  */
-const redactIds = (path) => path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id');
+const redactIds = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id');
 export const createHttpClient = (baseUrl, fetchImpl = fetch) => {
     const base = baseUrl.replace(/\/+$/, '');
     return {
@@ -69,7 +72,7 @@ export const createHttpClient = (baseUrl, fetchImpl = fetch) => {
                 parsed = raw;
             }
             if (!res.ok) {
-                throw new TangibleApiError(errorMessage(parsed, res.status), res.status, parsed);
+                throw new TangibleApiError(redactIds(errorMessage(parsed, res.status)), res.status, parsed);
             }
             // An empty body (204 and friends) legitimately carries nothing.
             if (parsed === undefined)

@@ -5,8 +5,13 @@ import {
   getCourse, listContentUnits, selectContext, selectProblem, selectSkill, addContext,
   type ContextCategory, type CourseContext,
 } from '../api/builder.js';
+import {
+  createSubUnit, listSubUnits, assignSkill, generateArtifact,
+} from '../api/subunits.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
-import { advance, assertRevisable, type ApproveInput, type Produced } from '../session/machine.js';
+import {
+  advance, assertRevisable, STEP_ORDER, type ApproveInput, type Produced,
+} from '../session/machine.js';
 import { renderGate, renderLedger } from '../session/ledger.js';
 import { reconcile, renderResume } from '../session/reconcile.js';
 import type { CourseMemory, LogEntry, Step } from '../session/memory.js';
@@ -87,6 +92,14 @@ const depsFor = (rt: Runtime, onProgress?: (m: string) => void) => ({
     selectSkill(rt.http, rt.auth, id, sid, on),
   selectProblem: (id: string, pid: string, on: boolean) =>
     selectProblem(rt.http, rt.auth, id, pid, on),
+  listContentUnits: (id: string) => listContentUnits(rt.http, rt.auth, id),
+  createSubUnit: (id: string, cuId: string, values: Parameters<typeof createSubUnit>[4]) =>
+    createSubUnit(rt.http, rt.auth, id, cuId, values),
+  assignSkill: (id: string, cuId: string, suId: string, body: { coreCompetencyModelId: string; levelId: string }) =>
+    assignSkill(rt.http, rt.auth, id, cuId, suId, body),
+  listSubUnits: (id: string, cuId: string) => listSubUnits(rt.http, rt.auth, id, cuId),
+  generateArtifact: (id: string, cuId: string, suId: string, body: { instruction?: string }) =>
+    generateArtifact(rt.http, rt.auth, id, cuId, suId, body),
   publish: (id: string) => publishCourse(rt.http, rt.auth, id),
   invite: (id: string, emails: string[]) => sendInvitations(rt.http, rt.auth, id, emails),
   onProgress,
@@ -111,6 +124,16 @@ const describeProduced = (produced: Produced): string => {
       return `Generated ${produced.problems.length} problem scenarios.`;
     case 'outline':
       return `Outline: ${produced.units.map((u) => u.title).join(', ') || '(empty)'}`;
+    case 'detail':
+      return produced.created.length === 0
+        ? 'Created 0 sub-content units.'
+        : `Created ${produced.created.length} sub-content unit${produced.created.length === 1 ? '' : 's'}: ` +
+          produced.created.map((c) => `${c.contentUnitTitle} › ${c.title}`).join(', ');
+    case 'artifacts':
+      return `Generated ${produced.generated.length} artifact${produced.generated.length === 1 ? '' : 's'}` +
+        (produced.failed.length > 0
+          ? `, ${produced.failed.length} failed: ${produced.failed.map((f) => f.title).join(', ')}.`
+          : '.');
     case 'published':
       return 'Course published.';
     case 'invited':
@@ -136,6 +159,8 @@ const actionFor = (produced: Produced): LogEntry['action'] => {
     case 'skills':
     case 'problems':
     case 'outline':
+    case 'detail':
+    case 'artifacts':
     case 'none':
       return 'approved';
   }
@@ -245,8 +270,29 @@ export const registerSessionTools = (
         );
       }
       const state = await current.store.load(current.env, sessionId);
+
+      // Only pay for the content-unit/sub-unit fetches once the course could
+      // possibly have any — a session still at "context" cannot, and must
+      // not eat the network cost of calls that only ever return nothing.
+      const detailReached =
+        STEP_ORDER.indexOf(state.step) >= STEP_ORDER.indexOf('detail');
+      let breakdown = '';
+      if (detailReached) {
+        const units = await listContentUnits(current.http, current.auth, state.courseId);
+        const lines: string[] = [];
+        for (const u of units) {
+          lines.push(u.title);
+          for (const s of await listSubUnits(current.http, current.auth, state.courseId, u.id)) {
+            lines.push(`  ${s.title}`);
+          }
+        }
+        // Names only — pbl_add_resource takes these, so this listing is what
+        // makes that tool reachable at all.
+        if (lines.length > 0) breakdown = `\n\nBreakdown:\n${lines.join('\n')}`;
+      }
+
       return text(
-        renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }),
+        renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) + breakdown,
       );
     },
   );
@@ -281,6 +327,25 @@ export const registerSessionTools = (
       selectSkills: z.array(z.string()).optional().describe('Skill names to keep; others are deselected'),
       selectProblem: z.string().optional().describe('Problem scenario title, id, or a unique prefix of either, to select'),
       emails: z.array(z.string().email()).optional().describe('Learner emails, for the invite gate'),
+      subUnits: z
+        .array(
+          z.object({
+            contentUnit: z.string().describe('Name of the content unit this sits under'),
+            title: z.string(),
+            description: z.string().optional(),
+            minutes: z.number().int().positive().max(60000).optional()
+              .describe('Estimated duration in MINUTES'),
+            skills: z.array(z.string()).min(1).max(10)
+              .describe('Skill names, resolved against the course’s selected skills'),
+          }),
+        )
+        .optional()
+        .describe(
+          'The sub-content-unit breakdown. Required when advancing to "detail". ' +
+            'Nothing is created until this call — draft it, get agreement, then send it.',
+        ),
+      instruction: z.string().optional()
+        .describe('Optional steer applied to every artifact at the "artifacts" gate'),
     },
     async ({ sessionId, ...input }, extra) => {
       const current = rt.current;

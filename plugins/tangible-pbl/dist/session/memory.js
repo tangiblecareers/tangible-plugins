@@ -98,7 +98,7 @@ const assertSafeId = (id) => {
 // depends on memory.ts for these very types. Keep in sync with machine.ts's
 // STEP_ORDER by hand if a step is ever added or renamed.
 const STEPS = [
-    'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+    'context', 'skills', 'problems', 'outline', 'detail', 'artifacts', 'publish', 'invite', 'done',
 ];
 const STATUS_LABELS = ['active', 'closed', 'published'];
 /**
