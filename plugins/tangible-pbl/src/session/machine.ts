@@ -34,6 +34,11 @@ export interface MachineDeps {
     courseId: string, contentUnitId: string, subUnitId: string,
     body: { coreCompetencyModelId: string; levelId: string },
   ): Promise<unknown>;
+  listSubUnits(courseId: string, contentUnitId: string): Promise<SubContentUnit[]>;
+  generateArtifact(
+    courseId: string, contentUnitId: string, subUnitId: string,
+    body: { instruction?: string },
+  ): Promise<unknown>;
   publish(courseId: string): Promise<Course>;
   invite(courseId: string, emails: string[]): Promise<unknown>;
   onProgress?(message: string): void;
@@ -44,6 +49,7 @@ export type Produced =
   | { kind: 'problems'; problems: CourseProblem[] }
   | { kind: 'outline'; units: ContentUnit[] }
   | { kind: 'detail'; created: { contentUnitTitle: string; title: string; skills: string[] }[] }
+  | { kind: 'artifacts'; generated: string[]; failed: { title: string; reason: string }[] }
   | { kind: 'published' }
   | { kind: 'invited'; count: number }
   | { kind: 'none' };
@@ -56,6 +62,8 @@ export interface ApproveInput {
   emails?: string[];
   /** The sub-content-unit breakdown, required when advancing to "detail". */
   subUnits?: SubUnitSpec[];
+  /** Optional steer applied to every artifact generated at the "artifacts" gate. */
+  instruction?: string;
 }
 
 export interface AdvanceResult {
@@ -176,6 +184,38 @@ export const advance = async (
         });
       }
       return done({ kind: 'detail', created });
+    }
+
+    case 'artifacts': {
+      const units = await deps.listContentUnits(state.courseId);
+      const generated: string[] = [];
+      const failed: { title: string; reason: string }[] = [];
+
+      for (const unit of units) {
+        for (const sub of await deps.listSubUnits(state.courseId, unit.id)) {
+          deps.onProgress?.(`Generating the artifact for "${sub.title}"…`);
+          try {
+            await deps.generateArtifact(state.courseId, unit.id, sub.id, {
+              ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
+            });
+            generated.push(sub.title);
+          } catch (err) {
+            // 409 means an artifact already exists, which satisfies the goal of
+            // "every sub-unit has one" — regenerating is a separate decision.
+            if ((err as { status?: number }).status === 409) {
+              generated.push(sub.title);
+              continue;
+            }
+            // Carry on: aborting here would discard every generation that
+            // already succeeded, and there is no way to resume mid-gate.
+            failed.push({
+              title: sub.title,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+      return done({ kind: 'artifacts', generated, failed });
     }
 
     case 'publish': {

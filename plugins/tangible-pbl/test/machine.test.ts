@@ -41,6 +41,8 @@ const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
   createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) =>
     Promise.resolve({ id: `su-${v.title}`, title: v.title })),
   assignSkill: vi.fn().mockResolvedValue({}),
+  listSubUnits: vi.fn().mockResolvedValue([]),
+  generateArtifact: vi.fn().mockResolvedValue({}),
   publish: vi.fn().mockResolvedValue({ id: 'c1', status: 'PUBLISHED' }),
   invite: vi.fn().mockResolvedValue({}),
   ...over,
@@ -301,5 +303,78 @@ describe('advance to detail', () => {
       }),
     ).rejects.toThrow(/No skill matching "Unknown"/);
     expect(d.createSubUnit).not.toHaveBeenCalled();
+  });
+});
+
+describe('advance to artifacts', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const subs = [{ id: 'su1', title: 'Lesson A' }, { id: 'su2', title: 'Lesson B' }];
+
+  const artifactDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    listSubUnits: vi.fn().mockResolvedValue(subs),
+    generateArtifact: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  it('generates one artifact per sub-unit', async () => {
+    const d = artifactDeps();
+    const { state: s, produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(s.step).toBe('artifacts');
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({ kind: 'artifacts', generated: ['Lesson A', 'Lesson B'], failed: [] });
+  });
+
+  it('passes the instruction to every call', async () => {
+    const d = artifactDeps();
+    await advance(d, state({ step: 'detail' }), { instruction: 'keep it practical' });
+    // Guard the loop below with a call-count assertion first — a loop over
+    // zero calls would otherwise pass vacuously if generateArtifact were
+    // never invoked at all.
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    for (const call of (d.generateArtifact as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[3]).toEqual({ instruction: 'keep it practical' });
+    }
+  });
+
+  it('counts a 409 as already satisfied, not a failure', async () => {
+    const conflict = Object.assign(new Error('artifact exists'), { status: 409 });
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(conflict)
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({ kind: 'artifacts', generated: ['Lesson A', 'Lesson B'], failed: [] });
+  });
+
+  it('continues past a failure and reports both lists', async () => {
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(new Error('upstream exploded'))
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    // Aborting on the first failure would discard the second generation and
+    // leave no way to resume mid-gate.
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect(produced).toEqual({
+      kind: 'artifacts',
+      generated: ['Lesson B'],
+      failed: [{ title: 'Lesson A', reason: 'upstream exploded' }],
+    });
+  });
+
+  it('advances even when every artifact fails, so the gate is not a dead end', async () => {
+    const d = artifactDeps({
+      generateArtifact: vi.fn().mockRejectedValue(new Error('nope')),
+    });
+    const { state: s, produced } = await advance(d, state({ step: 'detail' }), {});
+    expect(s.step).toBe('artifacts');
+    expect(d.generateArtifact).toHaveBeenCalledTimes(2);
+    expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).generated).toEqual([]);
+    expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).failed).toHaveLength(2);
   });
 });
