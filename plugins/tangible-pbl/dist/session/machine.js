@@ -1,3 +1,4 @@
+import { byName } from './by-name.js';
 export const STEP_ORDER = [
     'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
 ];
@@ -19,22 +20,6 @@ export const assertRevisable = (state, step) => {
             `the outline is generated (the course moved to DRAFT). Start a new ` +
             `course with an adjusted brief, or revise the outline instead.`);
     }
-};
-const byName = (items, label, needle, what) => {
-    const n = needle.trim().toLowerCase();
-    const isMatch = (i) => label(i).toLowerCase() === n || i.id.toLowerCase() === n;
-    const isPrefix = (i) => label(i).toLowerCase().startsWith(n) || i.id.toLowerCase().startsWith(n);
-    const exact = items.filter(isMatch);
-    if (exact.length === 1)
-        return exact[0];
-    const pre = items.filter(isPrefix);
-    if (pre.length === 1)
-        return pre[0];
-    const all = items.map(label).join(', ');
-    if (pre.length > 1) {
-        throw new Error(`"${needle}" matches more than one ${what}: ${pre.map(label).join(', ')}`);
-    }
-    throw new Error(`No ${what} matching "${needle}". Available: ${all}`);
 };
 export const advance = async (deps, state, input = {}) => {
     if (!state.awaitingApproval) {
