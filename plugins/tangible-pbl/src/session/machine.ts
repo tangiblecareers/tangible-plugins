@@ -1,9 +1,12 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
 import type { CourseMemory, Step } from './memory.js';
 import { byName } from './by-name.js';
+import { planSubUnits, type SubUnitSpec } from './detail-plan.js';
+import type { SubContentUnit } from '../api/subunits.js';
 
 export const STEP_ORDER: Step[] = [
-  'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+  'context', 'skills', 'problems', 'outline', 'detail', 'artifacts',
+  'publish', 'invite', 'done',
 ];
 
 /** Steps the backend freezes once content-units/generate flips the course to DRAFT. */
@@ -22,6 +25,15 @@ export interface MachineDeps {
   getCourse(courseId: string): Promise<Course>;
   selectSkill(courseId: string, courseSkillId: string, on: boolean): Promise<Course>;
   selectProblem(courseId: string, problemId: string, on: boolean): Promise<Course>;
+  listContentUnits(courseId: string): Promise<ContentUnit[]>;
+  createSubUnit(
+    courseId: string, contentUnitId: string,
+    values: { title: string; description?: string; estimatedDuration?: number },
+  ): Promise<SubContentUnit>;
+  assignSkill(
+    courseId: string, contentUnitId: string, subUnitId: string,
+    body: { coreCompetencyModelId: string; levelId: string },
+  ): Promise<unknown>;
   publish(courseId: string): Promise<Course>;
   invite(courseId: string, emails: string[]): Promise<unknown>;
   onProgress?(message: string): void;
@@ -31,6 +43,7 @@ export type Produced =
   | { kind: 'skills'; skills: CourseSkill[] }
   | { kind: 'problems'; problems: CourseProblem[] }
   | { kind: 'outline'; units: ContentUnit[] }
+  | { kind: 'detail'; created: { contentUnitTitle: string; title: string; skills: string[] }[] }
   | { kind: 'published' }
   | { kind: 'invited'; count: number }
   | { kind: 'none' };
@@ -41,6 +54,8 @@ export interface ApproveInput {
   /** Problem title, id, or a unique prefix of either, to select. */
   selectProblem?: string;
   emails?: string[];
+  /** The sub-content-unit breakdown, required when advancing to "detail". */
+  subUnits?: SubUnitSpec[];
 }
 
 export interface AdvanceResult {
@@ -122,11 +137,46 @@ export const advance = async (
       return done({ kind: 'outline', units });
     }
 
-    case 'detail':
-      // Sub-units, resources and artifacts are created un-gated by the tools
-      // layer; this step exists so the outline gate and the publish gate stay
-      // distinct in the ledger.
-      return done({ kind: 'none' });
+    case 'detail': {
+      if (!input.subUnits?.length) {
+        throw new Error(
+          'Pass subUnits to build the detail layer — each needs a contentUnit name, a ' +
+            'title, and at least one skill name. Nothing is created until this call.',
+        );
+      }
+      // Resolve and validate the whole breakdown first. planSubUnits throws
+      // rather than resolving partially, so a bad name cannot leave half the
+      // sub-units created with no way to tell which.
+      const [units, course] = await Promise.all([
+        deps.listContentUnits(state.courseId),
+        deps.getCourse(state.courseId),
+      ]);
+      const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? []);
+
+      const created: { contentUnitTitle: string; title: string; skills: string[] }[] = [];
+      for (const r of plan) {
+        deps.onProgress?.(`Creating "${r.title}"…`);
+        const su = await deps.createSubUnit(state.courseId, r.contentUnitId, {
+          title: r.title,
+          ...(r.description !== undefined ? { description: r.description } : {}),
+          ...(r.estimatedDuration !== undefined
+            ? { estimatedDuration: r.estimatedDuration }
+            : {}),
+        });
+        for (const skill of r.skills) {
+          await deps.assignSkill(state.courseId, r.contentUnitId, su.id, {
+            coreCompetencyModelId: skill.coreCompetencyModelId,
+            levelId: skill.levelId,
+          });
+        }
+        created.push({
+          contentUnitTitle: r.contentUnitTitle,
+          title: r.title,
+          skills: r.skills.map((s) => s.name),
+        });
+      }
+      return done({ kind: 'detail', created });
+    }
 
     case 'publish': {
       deps.onProgress?.('Publishing…');

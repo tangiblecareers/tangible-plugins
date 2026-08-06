@@ -745,7 +745,9 @@ describe('pbl_approve — publish gate sets status', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const seedAtDetail = async (store: CourseMemoryStore): Promise<void> => {
+  // Seeded one step short of publish. STEP_ORDER inserted 'artifacts' between
+  // 'detail' and 'publish' (see machine.ts) — 'artifacts' is now that spot.
+  const seedAtArtifacts = async (store: CourseMemoryStore): Promise<void> => {
     const now = new Date().toISOString();
     const state: CourseMemory = {
       id: 's1',
@@ -754,7 +756,7 @@ describe('pbl_approve — publish gate sets status', () => {
       courseId: 'c1',
       businessName: 'Acme',
       brief: 'a brief',
-      step: 'detail',
+      step: 'artifacts',
       awaitingApproval: true,
       status: 'active',
       created: now,
@@ -776,7 +778,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('persists status: "published" on the memory once the publish gate is approved', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' });
@@ -787,7 +789,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('the persisted memory no longer trips reconcile\'s "never marked published" warning', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' });
@@ -799,7 +801,7 @@ describe('pbl_approve — publish gate sets status', () => {
 
   it('keeps status "published" through a subsequent pbl_abort, so reconcile does not falsely warn it was never published', async () => {
     const rtHolder = { current: await makeRuntime(buildPublishHttp(), root) };
-    await seedAtDetail(rtHolder.current.store);
+    await seedAtArtifacts(rtHolder.current.store);
     const handlers = captureHandlers(registerSessionTools, rtHolder);
 
     await handlers.get('pbl_approve')!({ sessionId: 's1' }); // publish gate
