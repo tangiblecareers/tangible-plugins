@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { advance, assertRevisable, nextStep, STEP_ORDER } from '../src/session/machine.js';
 import type { MachineDeps } from '../src/session/machine.js';
 import type { CourseMemory } from '../src/session/memory.js';
+import { createHttpClient } from '../src/http.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
   id: 's1', title: 'Intro', env: 'staging', courseId: 'c1',
@@ -376,5 +377,36 @@ describe('advance to artifacts', () => {
     expect(d.generateArtifact).toHaveBeenCalledTimes(2);
     expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).generated).toEqual([]);
     expect((produced as { generated: string[]; failed: { title: string; reason: string }[] }).failed).toHaveLength(2);
+  });
+
+  // Regression: a TangibleApiError's message is the backend's own free text,
+  // and the backend can embed a sub-unit or course id directly in it (e.g. a
+  // not-found or duplicate-resource error). Route the rejection through the
+  // real http.ts so this pins the actual production chain — redaction lives
+  // in http.ts, not in machine.ts's catch — rather than asserting against a
+  // hand-built error that was never at risk of carrying an id in the first
+  // place.
+  it('never lets a UUID embedded in the backend message reach failed[].reason', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ message: 'Sub-unit 8f14e45f-ceea-467a-9f0e-0d0a0d0a0d0a not found' }),
+        { status: 404, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const http = createHttpClient('https://api.test/v1', fetchImpl);
+    const rejection = await http
+      .request({ method: 'POST', path: 'x' })
+      .catch((e: unknown) => e);
+
+    const d = artifactDeps({
+      generateArtifact: vi.fn()
+        .mockRejectedValueOnce(rejection)
+        .mockResolvedValueOnce({}),
+    });
+    const { produced } = await advance(d, state({ step: 'detail' }), {});
+    const failed = (produced as { failed: { title: string; reason: string }[] }).failed;
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.reason).toContain('not found');
+    expect(failed[0]!.reason).not.toContain('8f14e45f');
   });
 });
