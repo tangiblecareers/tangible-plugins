@@ -1,10 +1,12 @@
 {
   "name": "@tangible/pbl-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "MCP server that authors Problem-Based Learning courses in Tangible, with human approval gates at every expensive step.",
-  "bin": { "pbl-mcp": "./dist/index.js" },
+  "bin": {
+    "pbl-mcp": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,7 +29,13 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "keywords": ["tangible", "pbl", "mcp", "problem-based-learning", "claude"],
+  "keywords": [
+    "tangible",
+    "pbl",
+    "mcp",
+    "problem-based-learning",
+    "claude"
+  ],
   "author": "Tangible Engineering",
   "license": "MIT"
 }
