@@ -1310,7 +1310,12 @@ describe('pbl_approve — detail and artifacts gates', () => {
           Level: { id: 'lvl1', name: 'Foundational' },
         }],
       }],
-      [/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
+      // Anchored on the preceding slash: "sub-content-units" ends in
+      // "content-units" too, so an unanchored /content-units$/ would also
+      // match the create-sub-unit route below and shadow it (checked first,
+      // in array order) — returning an array with no top-level `id` for
+      // what should be the created sub-unit.
+      [/\/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
       [/sub-content-units$/, { id: 'su1', title: 'Lesson A' }],
     ]);
     const rtHolder = { current: await makeRuntime(http, root) };
@@ -1409,9 +1414,12 @@ describe('pbl_status — breakdown listing', () => {
     expect(calls.some((c) => /content-units/.test(c.path))).toBe(false);
   });
 
-  it('lists content units and their sub-units by name, with no id, once "detail" is reached', async () => {
+  it('lists content units, sub-units and their skills by name, with no id, once "detail" is reached', async () => {
     const request = vi.fn(async (opts: RequestOpts) => {
       if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
+        return [{ coreCompetencyModelId: 'ccm1', levelId: 'lvl1', name: 'Visual Hierarchy' }];
+      }
       if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
         return [{ id: 'su1', title: 'Lesson A' }];
       }
@@ -1430,7 +1438,37 @@ describe('pbl_status — breakdown listing', () => {
     expect(out).toContain('Breakdown:');
     expect(out).toContain('Module One');
     expect(out).toContain('Lesson A');
-    expect(out).not.toMatch(/cu1|su1/);
+    expect(out).toContain('Visual Hierarchy');
+    expect(out).not.toMatch(/cu1|su1|ccm1|lvl1/);
+  });
+
+  // Regression guard for the UUID non-negotiable: SubUnitSkill.name is
+  // optional, so a skill with only a bare coreCompetencyModelId must never
+  // render as that id. The fixture below makes the forbidden id genuinely
+  // reachable (the skill has no name), so this test cannot pass vacuously.
+  it('never renders a bare coreCompetencyModelId in the breakdown — falls back to a count', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
+        return [{ coreCompetencyModelId: 'ccm-secret-uuid' }];
+      }
+      if (/content-units\/cu1\/sub-content-units$/.test(opts.path)) {
+        return [{ id: 'su1', title: 'Lesson A' }];
+      }
+      if (opts.path.endsWith('/content-units')) return [{ id: 'cu1', title: 'Module One' }];
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'detail');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Lesson A (1 skill)');
+    expect(out).not.toContain('ccm-secret-uuid');
   });
 });
 
@@ -1495,6 +1533,29 @@ describe('pbl_add_resource — addressed by name', () => {
 
     expect(err!.message).toContain('Lesson A');
     expect(err!.message).not.toContain('su1');
+  });
+});
+
+// Regression: pbl_publish and pbl_invite take a raw courseId and operate on
+// any course, session or not — they are escape hatches, not gate N of the
+// STEP_ORDER pipeline. Their live tools/list description strings used to say
+// "Gate 5"/"Gate 6" (stale even against the README, which had already moved
+// to 7/8 elsewhere) — pin that the number is gone rather than renumbered.
+describe('direct tool descriptions', () => {
+  it('carry no stale "Gate N" numbering', async () => {
+    const { http } = routed([]);
+    const server = new McpServer({ name: 'test', version: '0.0.0' });
+    const descriptions = new Map<string, string>();
+    (server as unknown as { tool: (...a: unknown[]) => unknown }).tool = (
+      ...args: unknown[]
+    ) => {
+      descriptions.set(args[0] as string, args[1] as string);
+      return undefined;
+    };
+    registerDirectTools(server, await directRuntime(http));
+
+    expect(descriptions.get('pbl_publish')).not.toMatch(/Gate \d/);
+    expect(descriptions.get('pbl_invite')).not.toMatch(/Gate \d/);
   });
 });
 

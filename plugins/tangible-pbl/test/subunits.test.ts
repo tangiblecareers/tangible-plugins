@@ -89,3 +89,46 @@ describe('subunits api', () => {
     expect(request.mock.calls[0]![0].body).toEqual({ instruction: 'keep it practical' });
   });
 });
+
+/**
+ * Regression: createSubUnit's result is used directly as `su.id` in
+ * machine.ts's next call (assignSkill). asCourse in builder.ts exists
+ * because a live run once hit exactly this failure mode for the course id —
+ * a wrapped payload meant `course.id` was undefined and every following call
+ * went to `business/courses/undefined/...`. createSubUnit had no equivalent
+ * defence: a `{ subContentUnit: {…} }` envelope here would post to
+ * `…/sub-content-units/undefined/skills` the same way.
+ */
+describe('createSubUnit — resolving the sub-unit id from an undocumented shape', () => {
+  it('finds the id on a bare sub-content-unit object', async () => {
+    const { http } = spyHttp({ id: 'su1', title: 'Intro' });
+    await expect(createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }))
+      .resolves.toMatchObject({ id: 'su1' });
+  });
+
+  it('finds the id nested under .subContentUnit', async () => {
+    const { http } = spyHttp({ subContentUnit: { id: 'su1', title: 'Intro' } });
+    await expect(createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }))
+      .resolves.toMatchObject({ id: 'su1' });
+  });
+
+  it('finds the id nested under .data', async () => {
+    const { http } = spyHttp({ data: { id: 'su1', title: 'Intro' } });
+    await expect(createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }))
+      .resolves.toMatchObject({ id: 'su1' });
+  });
+
+  it('throws naming the keys actually present when no id is found anywhere', async () => {
+    const { http } = spyHttp({ result: { name: 'Intro' }, meta: 1 });
+    await expect(
+      createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }),
+    ).rejects.toThrow(/createSubUnit: no id in the response.*result\{name\}.*meta/s);
+  });
+
+  it('rejects an empty-string id rather than passing it downstream', async () => {
+    const { http } = spyHttp({ id: '' });
+    await expect(
+      createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }),
+    ).rejects.toThrow(/no id in the response/);
+  });
+});

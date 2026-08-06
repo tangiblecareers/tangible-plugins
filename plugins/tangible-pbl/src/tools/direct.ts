@@ -49,7 +49,7 @@ export const registerDirectTools = (
 
   server.tool(
     'pbl_publish',
-    'Publish a DRAFT course. Gate 5 — learners can see it afterwards.',
+    'Publish a DRAFT course — learners can see it afterwards.',
     { courseId: z.string() },
     async ({ courseId }) => {
       const current = rt.current;
@@ -93,7 +93,7 @@ export const registerDirectTools = (
 
   server.tool(
     'pbl_invite',
-    'Invite learners by email. Gate 6 — this sends real mail and cannot be undone.',
+    'Invite learners by email — this sends real mail and cannot be undone.',
     { courseId: z.string(), emails: z.array(z.string().email()).min(1) },
     async ({ courseId, emails }) => {
       const current = rt.current;

@@ -5,6 +5,35 @@ export const renderLedger = (state) => {
     const at = STEP_ORDER.indexOf(state.step);
     return VISIBLE.map((s, i) => `${i <= at ? '✓' : '○'} ${s}`).join(' · ');
 };
+/**
+ * Renders the content-unit / sub-unit / skill breakdown pbl_status shows once
+ * the "detail" step is reached. This is how an operator confirms the detail
+ * gate did what they approved, and spots a sub-unit that would block
+ * pbl_publish before running it.
+ *
+ * `SubUnitSkill.name` is optional (subunits.ts) — the backend can return a
+ * skill with only a bare `coreCompetencyModelId`. Rendering that id would be
+ * a UUID leak, breaching this plugin's standing non-negotiable. A sub-unit
+ * whose skills are not all named therefore renders as a count instead of a
+ * name list — do NOT "fix" this by falling back to the id.
+ */
+export const renderBreakdown = (units) => {
+    const lines = [];
+    for (const u of units) {
+        lines.push(u.title);
+        for (const s of u.subs) {
+            if (s.skills.length === 0) {
+                lines.push(`  ${s.title}`);
+                continue;
+            }
+            const names = s.skills.map((k) => k.name).filter((n) => Boolean(n));
+            lines.push(names.length === s.skills.length
+                ? `  ${s.title} [${names.join(', ')}]`
+                : `  ${s.title} (${s.skills.length} skill${s.skills.length === 1 ? '' : 's'})`);
+        }
+    }
+    return lines.length > 0 ? `\n\nBreakdown:\n${lines.join('\n')}` : '';
+};
 const renderProduced = (produced) => {
     switch (produced.kind) {
         case 'skills':

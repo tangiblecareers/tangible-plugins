@@ -84,10 +84,48 @@ describe('planSubUnits', () => {
     ).toHaveLength(10);
   });
 
-  it('rejects a skill with no Level, naming it — levelId is required to assign', () => {
-    const noLevel = [skill('Visual Hierarchy', { Level: undefined })];
-    expect(() => planSubUnits([spec()], units, noLevel))
+  it('rejects a skill with no Level, naming it, when the other selected skills do carry one', () => {
+    // Mixed case: only one of three selected skills lacks a level. This must
+    // stay the per-skill message — the systemic message below is reserved
+    // for when *every* selected skill lacks one.
+    const mixed = [
+      skill('Visual Hierarchy', { Level: undefined }),
+      skill('Typographic Systems'),
+      skill('Critique'),
+    ];
+    expect(() => planSubUnits([spec()], units, mixed))
       .toThrow(/Visual Hierarchy.*no level/s);
+  });
+
+  it('rejects with a systemic message when every selected skill lacks a level', () => {
+    // If CourseSkill has no Level field at all (a response-shape mismatch —
+    // see CLAUDE.md), every selected skill lacks one and the per-skill
+    // message would send an operator through every skill in the course
+    // before suspecting the client. This must name the count and point at
+    // the client, not blame the first skill in the list.
+    const allNoLevel = [
+      skill('Visual Hierarchy', { Level: undefined }),
+      skill('Typographic Systems', { Level: undefined }),
+      skill('Critique', { Level: undefined }),
+    ];
+    expect(() => planSubUnits([spec()], units, allNoLevel))
+      .toThrow(/None of the 3 selected skills carries a level/);
+  });
+
+  it('still raises the systemic message when an unselected skill happens to carry a level', () => {
+    // Guards against a broken predicate that checks courseSkills.every(...)
+    // over the full list instead of selected.every(...) — an unselected
+    // skill that happens to carry a level must not mask a systemic problem
+    // among the selected skills. With the buggy full-list check, this
+    // fixture's one selected+level-less skill would be masked by the
+    // unselected+leveled one and fall through to the old per-skill message
+    // instead.
+    const mixed = [
+      skill('Visual Hierarchy', { Level: undefined }),
+      skill('Unselected With Level', { isSelected: false }),
+    ];
+    expect(() => planSubUnits([spec()], units, mixed))
+      .toThrow(/None of the 1 selected skills carries a level/);
   });
 
   it('only considers selected skills', () => {
@@ -117,6 +155,40 @@ describe('planSubUnits', () => {
   it('accepts minutes at exactly the backend ceiling of 60000 — the boundary itself', () => {
     expect(planSubUnits([spec({ minutes: 60000 })], units, skills)[0]!.estimatedDuration)
       .toBe(60000);
+  });
+
+  it('rejects two sub-content units named the same thing under one content unit', () => {
+    // pbl_add_resource resolves a sub-unit by name; a second sub-unit with
+    // the same title under the same content unit makes that lookup
+    // permanently ambiguous, and there is no rename/delete/reorder route to
+    // recover afterward.
+    expect(() =>
+      planSubUnits(
+        [spec({ title: 'Intro' }), spec({ title: 'Intro' })],
+        units,
+        skills,
+      ),
+    ).toThrow(/Seeing Before Styling.*two sub-content units named "Intro"/s);
+  });
+
+  it('treats title collisions case-insensitively and after trimming', () => {
+    expect(() =>
+      planSubUnits(
+        [spec({ title: 'Intro' }), spec({ title: '  INTRO  ' })],
+        units,
+        skills,
+      ),
+    ).toThrow(/two sub-content units/);
+  });
+
+  it('allows the same title under two different content units', () => {
+    expect(() =>
+      planSubUnits(
+        [spec({ title: 'Intro' }), spec({ contentUnit: 'Type as a System', title: 'Intro' })],
+        units,
+        skills,
+      ),
+    ).not.toThrow();
   });
 
   it('never puts an id in a validation error', () => {

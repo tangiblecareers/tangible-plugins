@@ -1,6 +1,7 @@
 import type { Produced } from './machine.js';
 import { STEP_ORDER, nextStep } from './machine.js';
 import type { CourseMemory } from './memory.js';
+import type { SubUnitSkill } from '../api/subunits.js';
 
 const VISIBLE = STEP_ORDER.filter((s) => s !== 'done');
 
@@ -10,6 +11,50 @@ export const courseUrl = (appUrl: string, courseId: string): string =>
 export const renderLedger = (state: CourseMemory): string => {
   const at = STEP_ORDER.indexOf(state.step);
   return VISIBLE.map((s, i) => `${i <= at ? '✓' : '○'} ${s}`).join(' · ');
+};
+
+/** One sub-content unit with its skills, as pbl_status fetches them. */
+export interface BreakdownSubUnit {
+  title: string;
+  skills: SubUnitSkill[];
+}
+
+/** One content unit with its sub-units, as pbl_status fetches them. */
+export interface BreakdownUnit {
+  title: string;
+  subs: BreakdownSubUnit[];
+}
+
+/**
+ * Renders the content-unit / sub-unit / skill breakdown pbl_status shows once
+ * the "detail" step is reached. This is how an operator confirms the detail
+ * gate did what they approved, and spots a sub-unit that would block
+ * pbl_publish before running it.
+ *
+ * `SubUnitSkill.name` is optional (subunits.ts) — the backend can return a
+ * skill with only a bare `coreCompetencyModelId`. Rendering that id would be
+ * a UUID leak, breaching this plugin's standing non-negotiable. A sub-unit
+ * whose skills are not all named therefore renders as a count instead of a
+ * name list — do NOT "fix" this by falling back to the id.
+ */
+export const renderBreakdown = (units: BreakdownUnit[]): string => {
+  const lines: string[] = [];
+  for (const u of units) {
+    lines.push(u.title);
+    for (const s of u.subs) {
+      if (s.skills.length === 0) {
+        lines.push(`  ${s.title}`);
+        continue;
+      }
+      const names = s.skills.map((k) => k.name).filter((n): n is string => Boolean(n));
+      lines.push(
+        names.length === s.skills.length
+          ? `  ${s.title} [${names.join(', ')}]`
+          : `  ${s.title} (${s.skills.length} skill${s.skills.length === 1 ? '' : 's'})`,
+      );
+    }
+  }
+  return lines.length > 0 ? `\n\nBreakdown:\n${lines.join('\n')}` : '';
 };
 
 const renderProduced = (produced: Produced): string => {
