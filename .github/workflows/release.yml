@@ -25,8 +25,12 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Runs on release-please's own pull request and syncs the root marketplace
-  # manifest into it, so one merge lands one consistent state. Deliberately NOT
+  # Best-effort sync into release-please's own pull request, so the common case
+  # is one merge landing one consistent state. This CANNOT be relied on:
+  # release-please force-pushes its release branch whenever it recomputes (any
+  # new commit on main), which discards the sync commit a previous run added,
+  # and the re-run that would restore it lands in `action_required` and never
+  # executes. `sync-main` below owns the guarantee. Deliberately NOT
   # `needs: release` — coupling the two meant a failed release job skipped the
   # sync entirely, which is exactly what happened on the first real run.
   sync-marketplace:
@@ -58,4 +62,41 @@ jobs:
             git push origin HEAD:${{ github.head_ref }}
           fi
       - name: Verify the release PR is internally consistent
+        run: node scripts/validate.mjs
+
+  # The guarantee. marketplace.json is derived from each plugin's plugin.json,
+  # so whatever reaches main can always be reconciled from main alone — this
+  # needs neither release-please nor the PR-side job to have succeeded.
+  #
+  # This exists because tangible-pbl 0.2.0 merged with package.json and
+  # plugin.json at 0.2.0 and marketplace.json still at 0.1.0, turning main red:
+  # release-please had force-pushed the release branch after the PR-side sync
+  # ran, discarding it. Not `needs: release` for the same reason as above — a
+  # failed release job must not be able to skip the sync.
+  sync-main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sync-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Derive marketplace versions
+        run: node scripts/sync-marketplace.mjs
+      - name: Commit if changed
+        run: |
+          if [ -n "$(git status --porcelain .claude-plugin/marketplace.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .claude-plugin/marketplace.json
+            git commit -m "chore: sync marketplace versions"
+            git push origin HEAD:main
+          fi
+      - name: Verify main is internally consistent
         run: node scripts/validate.mjs
