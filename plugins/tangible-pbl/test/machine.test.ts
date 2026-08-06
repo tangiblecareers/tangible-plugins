@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { advance, assertRevisable, nextStep, STEP_ORDER } from '../src/session/machine.js';
+import type { MachineDeps } from '../src/session/machine.js';
 import type { CourseMemory } from '../src/session/memory.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
@@ -10,23 +11,36 @@ const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
 });
 
 const SKILLS = [
-  { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'm1', name: 'Triage' } },
-  { id: 'cs2', isSelected: true, CoreCompetencyModel: { id: 'm2', name: 'Comms' } },
+  {
+    id: 'cs1', isSelected: true,
+    CoreCompetencyModel: { id: 'm1', name: 'Triage' },
+    Level: { id: 'lvl1', name: 'Foundational' },
+  },
+  {
+    id: 'cs2', isSelected: true,
+    CoreCompetencyModel: { id: 'm2', name: 'Comms' },
+    Level: { id: 'lvl2', name: 'Foundational' },
+  },
 ];
 const PROBLEMS = [
   { id: 'p1', title: 'Outage', isSelected: false },
   { id: 'p2', title: 'Breach', isSelected: false },
 ];
+const UNITS = [{ id: 'u1', title: 'Unit 1' }];
 
 const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
   generateSkills: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING', CourseSkills: SKILLS }),
   generateProblems: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING', CourseProblems: PROBLEMS }),
-  generateContentUnits: vi.fn().mockResolvedValue([{ id: 'u1', title: 'Unit 1' }]),
+  generateContentUnits: vi.fn().mockResolvedValue(UNITS),
   getCourse: vi.fn().mockResolvedValue({
     id: 'c1', status: 'DRAFT', CourseSkills: SKILLS, CourseProblems: PROBLEMS,
   }),
   selectSkill: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING' }),
   selectProblem: vi.fn().mockResolvedValue({ id: 'c1', status: 'INITIALIZING' }),
+  listContentUnits: vi.fn().mockResolvedValue(UNITS),
+  createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) =>
+    Promise.resolve({ id: `su-${v.title}`, title: v.title })),
+  assignSkill: vi.fn().mockResolvedValue({}),
   publish: vi.fn().mockResolvedValue({ id: 'c1', status: 'PUBLISHED' }),
   invite: vi.fn().mockResolvedValue({}),
   ...over,
@@ -35,7 +49,8 @@ const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
 describe('STEP_ORDER', () => {
   it('matches the builder pipeline', () => {
     expect(STEP_ORDER).toEqual([
-      'context', 'skills', 'problems', 'outline', 'detail', 'publish', 'invite', 'done',
+      'context', 'skills', 'problems', 'outline', 'detail', 'artifacts',
+      'publish', 'invite', 'done',
     ]);
   });
 
@@ -64,8 +79,12 @@ describe('the gate guarantee', () => {
   it('never reaches publish without four explicit advances', async () => {
     const d = deps();
     let s = state({ step: 'context' });
+    const input = {
+      selectProblem: 'p1',
+      subUnits: [{ contentUnit: 'Unit 1', title: 'Lesson', skills: ['Triage'] }],
+    };
     for (const expected of ['skills', 'problems', 'outline', 'detail']) {
-      ({ state: s } = await advance(d, s, { selectProblem: 'p1' }));
+      ({ state: s } = await advance(d, s, input));
       expect(s.step).toBe(expected);
       expect(d.publish).not.toHaveBeenCalled();
     }
@@ -153,7 +172,7 @@ describe('advance produces reviewable output', () => {
 
   it('publishes then invites across two gates', async () => {
     const d = deps();
-    let s = state({ step: 'detail' });
+    let s = state({ step: 'artifacts' });
     ({ state: s } = await advance(d, s));
     expect(d.publish).toHaveBeenCalledWith('c1');
     expect(s.step).toBe('publish');
@@ -202,5 +221,85 @@ describe('assertRevisable', () => {
 
   it('still allows revising the outline after it exists', () => {
     expect(() => assertRevisable(state({ step: 'detail' }), 'outline')).not.toThrow();
+  });
+});
+
+describe('advance to detail', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const skills = [{
+    id: 'cs1', isSelected: true,
+    CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+    Level: { id: 'lvl1', name: 'Foundational' },
+  }];
+
+  const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: skills }),
+    createSubUnit: vi.fn().mockImplementation((_c, _cu, v) =>
+      Promise.resolve({ id: `su-${v.title}`, title: v.title })),
+    assignSkill: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  const input = {
+    subUnits: [{
+      contentUnit: 'Module One',
+      title: 'Lesson A',
+      minutes: 45,
+      skills: ['Visual Hierarchy'],
+    }],
+  };
+
+  it('creates each sub-unit and assigns its skills', async () => {
+    const d = detailDeps();
+    const { state: s, produced } = await advance(d, state({ step: 'outline' }), input);
+    expect(s.step).toBe('detail');
+    expect(d.createSubUnit).toHaveBeenCalledWith('c1', 'cu1', {
+      title: 'Lesson A', estimatedDuration: 45,
+    });
+    expect(d.assignSkill).toHaveBeenCalledWith('c1', 'cu1', 'su-Lesson A', {
+      coreCompetencyModelId: 'ccm1', levelId: 'lvl1',
+    });
+    expect(produced).toEqual({
+      kind: 'detail',
+      created: [{ contentUnitTitle: 'Module One', title: 'Lesson A', skills: ['Visual Hierarchy'] }],
+    });
+  });
+
+  it('refuses to advance without a breakdown', async () => {
+    await expect(advance(detailDeps(), state({ step: 'outline' }), {}))
+      .rejects.toThrow(/subUnits/);
+    // An empty array is truthy, so the `{}` case above alone cannot catch a
+    // regression from `.subUnits?.length` to a bare `!input.subUnits` check.
+    // This must be asserted explicitly.
+    await expect(advance(detailDeps(), state({ step: 'outline' }), { subUnits: [] }))
+      .rejects.toThrow(/subUnits/);
+  });
+
+  it('writes nothing when validation fails', async () => {
+    const d = detailDeps();
+    await expect(
+      advance(d, state({ step: 'outline' }), {
+        subUnits: [{ contentUnit: 'Nope', title: 'A', skills: ['Visual Hierarchy'] }],
+      }),
+    ).rejects.toThrow(/No content unit matching/);
+    // The whole point of validating first: a bad name in the breakdown must not
+    // leave half of it created.
+    expect(d.createSubUnit).not.toHaveBeenCalled();
+    expect(d.assignSkill).not.toHaveBeenCalled();
+  });
+
+  it('validates every entry before creating any of them', async () => {
+    const d = detailDeps();
+    await expect(
+      advance(d, state({ step: 'outline' }), {
+        subUnits: [
+          { contentUnit: 'Module One', title: 'Good', skills: ['Visual Hierarchy'] },
+          { contentUnit: 'Module One', title: 'Bad', skills: ['Unknown'] },
+        ],
+      }),
+    ).rejects.toThrow(/No skill matching "Unknown"/);
+    expect(d.createSubUnit).not.toHaveBeenCalled();
   });
 });
