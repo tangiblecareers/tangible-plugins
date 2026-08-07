@@ -330,13 +330,10 @@ describe('renderSkills', () => {
     expect(out).toContain('Critique — (levels unavailable)');
   });
 
-  it('never renders a level or competency id — names only', () => {
-    // Deliberately not part of the input at all: SkillLevelsEntry carries no
-    // id field, so there is nothing here for the renderer to leak — this is
-    // the structural guarantee, not a runtime check of a value.
-    const out = renderSkills([{ name: 'Visual Hierarchy', levels: ['Foundational'] }]);
-    expect(out).not.toMatch(/ccm-|lvl-|[0-9a-f]{8}-[0-9a-f]{4}/);
-  });
+  // A no-id assertion at this level would be vacuous: SkillLevelsEntry has no
+  // id field, so the fixture cannot contain one and the assertion cannot fail.
+  // The real guarantee is exercised in tools.test.ts, where realistic UUIDs
+  // travel the whole fetch-and-render path and could actually leak.
 
   it('returns an empty string for no skills, so pbl_status appends nothing', () => {
     expect(renderSkills([])).toBe('');
