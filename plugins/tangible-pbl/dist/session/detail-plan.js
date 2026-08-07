@@ -6,31 +6,61 @@ const MAX_MINUTES = 60000;
 /**
  * Resolves a caller-supplied breakdown against the live course, or throws.
  *
- * Pure and total: it either returns a fully resolved plan or throws having
- * written nothing. The detail gate depends on that — a partial resolution
- * would leave sub-units created for the valid half of a breakdown and nothing
- * for the rest, with no way to tell which.
+ * Pure and total: it never fetches, and it either returns a fully resolved
+ * plan or throws having written nothing. `levelsByCompetencyId` must already
+ * hold every selected skill's levels the breakdown could reference — the
+ * caller (the "detail" case in machine.ts) collects the distinct skill names
+ * across the whole breakdown and fetches each competency's levels once,
+ * before calling this and before any write. That split matters for two
+ * reasons: a partial resolution here would leave sub-units created for the
+ * valid half of a breakdown with no way to tell which, and a fetch buried in
+ * a pure resolver would make "validate everything before the first write"
+ * impossible to guarantee.
+ *
+ * A skill is no longer resolved via `CourseSkill.Level` — that field does not
+ * exist on the backend and never can (see CLAUDE.md). The level is chosen
+ * per sub-unit, against the skill's competency's own levels.
  *
  * Every message names the offender by name. No id appears in any error: the
  * caller addresses everything by name and has no use for one.
  */
-export const planSubUnits = (specs, units, courseSkills) => {
+export const planSubUnits = (specs, units, courseSkills, levelsByCompetencyId) => {
     if (specs.length === 0) {
         throw new Error('Pass at least one sub-content unit to create.');
     }
     const selected = courseSkills.filter((s) => s.isSelected);
-    // If every selected skill lacks a level, this is almost certainly the
-    // client misreading the response shape rather than genuine course data —
-    // see asCourse in src/api/builder.ts for the house style this follows.
-    // Blaming individual skills (the per-skill message below) sends an
-    // operator through every skill in the course before suspecting the client.
-    if (selected.length > 0 && selected.every((s) => !s.Level?.id)) {
-        throw new Error(`None of the ${selected.length} selected skills carries a level, and assigning a ` +
-            `skill to a sub-content unit requires one. This is almost certainly a response-shape ` +
-            `mismatch rather than course data — the client reads it from CourseSkill.Level.id. ` +
-            `Keys actually present on a selected skill: ${Object.keys(selected[0]).join(', ')}. ` +
-            `Report this shape.`);
-    }
+    const resolveSkill = (title, skillSpec) => {
+        const match = byName(selected, (k) => k.CoreCompetencyModel.name, skillSpec.name, 'skill');
+        const levels = levelsByCompetencyId.get(match.CoreCompetencyModel.id) ?? [];
+        if (levels.length === 0) {
+            throw new Error(`Skill "${match.CoreCompetencyModel.name}" has no levels defined for its ` +
+                `competency, so it cannot be assigned to a sub-content unit. This is a data ` +
+                `problem, not a client bug — it must be fixed in the app by adding at least ` +
+                `one level to that competency.`);
+        }
+        let level;
+        if (skillSpec.level !== undefined) {
+            const wanted = skillSpec.level.trim().toLowerCase();
+            level = levels.find((l) => l.name.trim().toLowerCase() === wanted);
+            if (!level) {
+                throw new Error(`Skill "${match.CoreCompetencyModel.name}" has no level named "${skillSpec.level}". ` +
+                    `Available levels: ${levels.map((l) => l.name).join(', ')}.`);
+            }
+        }
+        else if (levels.length === 1) {
+            level = levels[0];
+        }
+        else {
+            throw new Error(`"${title}" needs a level for skill "${match.CoreCompetencyModel.name}" — this ` +
+                `competency has ${levels.length} levels: ${levels.map((l) => l.name).join(', ')}. ` +
+                `Pass one by name in skills[].level.`);
+        }
+        return {
+            coreCompetencyModelId: match.CoreCompetencyModel.id,
+            levelId: level.id,
+            name: match.CoreCompetencyModel.name,
+        };
+    };
     const resolved = specs.map((s) => {
         const title = s.title?.trim() ?? '';
         if (title.length === 0) {
@@ -53,18 +83,7 @@ export const planSubUnits = (specs, units, courseSkills) => {
                 throw new Error(`"${title}" has minutes=${s.minutes}, above the maximum of 60000.`);
             }
         }
-        const skills = s.skills.map((name) => {
-            const match = byName(selected, (k) => k.CoreCompetencyModel.name, name, 'skill');
-            if (!match.Level?.id) {
-                throw new Error(`Skill "${match.CoreCompetencyModel.name}" has no level, and assigning a skill ` +
-                    `to a sub-content unit requires one. Choose a different skill for "${title}".`);
-            }
-            return {
-                coreCompetencyModelId: match.CoreCompetencyModel.id,
-                levelId: match.Level.id,
-                name: match.CoreCompetencyModel.name,
-            };
-        });
+        const skills = s.skills.map((skillSpec) => resolveSkill(title, skillSpec));
         return {
             contentUnitId: unit.id,
             contentUnitTitle: unit.title,

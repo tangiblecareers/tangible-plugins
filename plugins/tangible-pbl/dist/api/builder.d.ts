@@ -15,10 +15,6 @@ export interface CourseSkill {
         id: string;
         name: string;
     };
-    Level?: {
-        id: string;
-        name: string;
-    };
 }
 export interface CourseProblem {
     id: string;

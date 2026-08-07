@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderLedger, renderGate, courseUrl, renderBreakdown } from '../src/session/ledger.js';
+import { renderLedger, renderGate, courseUrl, renderBreakdown, renderSkills } from '../src/session/ledger.js';
 import type { CourseMemory } from '../src/session/memory.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
@@ -306,5 +306,39 @@ describe('renderBreakdown', () => {
 
   it('returns an empty string for no content units, so pbl_status appends nothing', () => {
     expect(renderBreakdown([])).toBe('');
+  });
+});
+
+describe('renderSkills', () => {
+  it('lists each skill with its levels, comma-separated', () => {
+    const out = renderSkills([
+      { name: 'Visual Hierarchy', levels: ['Foundational', 'Proficient', 'Advanced'] },
+      { name: 'Typographic Systems', levels: ['Foundational', 'Proficient'] },
+    ]);
+    expect(out).toContain('Skills:');
+    expect(out).toContain('Visual Hierarchy — Foundational, Proficient, Advanced');
+    expect(out).toContain('Typographic Systems — Foundational, Proficient');
+  });
+
+  it('renders a skill with no levels as "(no levels)" rather than omitting it', () => {
+    const out = renderSkills([{ name: 'Critique', levels: [] }]);
+    expect(out).toContain('Critique — (no levels)');
+  });
+
+  it('renders a failed lookup as "(levels unavailable)" rather than dropping the skill', () => {
+    const out = renderSkills([{ name: 'Critique', levels: null }]);
+    expect(out).toContain('Critique — (levels unavailable)');
+  });
+
+  it('never renders a level or competency id — names only', () => {
+    // Deliberately not part of the input at all: SkillLevelsEntry carries no
+    // id field, so there is nothing here for the renderer to leak — this is
+    // the structural guarantee, not a runtime check of a value.
+    const out = renderSkills([{ name: 'Visual Hierarchy', levels: ['Foundational'] }]);
+    expect(out).not.toMatch(/ccm-|lvl-|[0-9a-f]{8}-[0-9a-f]{4}/);
+  });
+
+  it('returns an empty string for no skills, so pbl_status appends nothing', () => {
+    expect(renderSkills([])).toBe('');
   });
 });

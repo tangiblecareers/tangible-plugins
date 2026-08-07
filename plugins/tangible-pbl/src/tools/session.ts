@@ -9,10 +9,14 @@ import {
   createSubUnit, listSubUnits, listSubUnitSkills, assignSkill, generateArtifact,
 } from '../api/subunits.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
+import { getCompetencyLevels } from '../api/competency.js';
 import {
   advance, assertRevisable, STEP_ORDER, type ApproveInput, type Produced,
 } from '../session/machine.js';
-import { renderGate, renderLedger, renderBreakdown, type BreakdownUnit } from '../session/ledger.js';
+import {
+  renderGate, renderLedger, renderBreakdown, renderSkills,
+  type BreakdownUnit, type SkillLevelsEntry,
+} from '../session/ledger.js';
 import { reconcile, renderResume } from '../session/reconcile.js';
 import type { CourseMemory, LogEntry, Step } from '../session/memory.js';
 import { resolveBusiness } from '../resolve.js';
@@ -97,6 +101,7 @@ const depsFor = (rt: Runtime, onProgress?: (m: string) => void) => ({
     createSubUnit(rt.http, rt.auth, id, cuId, values),
   assignSkill: (id: string, cuId: string, suId: string, body: { coreCompetencyModelId: string; levelId: string }) =>
     assignSkill(rt.http, rt.auth, id, cuId, suId, body),
+  getCompetencyLevels: (id: string) => getCompetencyLevels(rt.http, rt.auth, id),
   listSubUnits: (id: string, cuId: string) => listSubUnits(rt.http, rt.auth, id, cuId),
   generateArtifact: (id: string, cuId: string, suId: string, body: { instruction?: string }) =>
     generateArtifact(rt.http, rt.auth, id, cuId, suId, body),
@@ -271,6 +276,31 @@ export const registerSessionTools = (
       }
       const state = await current.store.load(current.env, sessionId);
 
+      // Only pay for the course/competency fetches once skills could exist —
+      // a session still at "context" has none selected yet, and must not eat
+      // the network cost of calls that only ever return nothing.
+      const skillsReached =
+        STEP_ORDER.indexOf(state.step) >= STEP_ORDER.indexOf('skills');
+      let skillsSection = '';
+      if (skillsReached) {
+        const course = await getCourse(current.http, current.auth, state.courseId);
+        const selected = (course.CourseSkills ?? []).filter((s) => s.isSelected);
+        const entries: SkillLevelsEntry[] = [];
+        for (const s of selected) {
+          try {
+            const levels = await getCompetencyLevels(
+              current.http, current.auth, s.CoreCompetencyModel.id,
+            );
+            entries.push({ name: s.CoreCompetencyModel.name, levels: levels.map((l) => l.name) });
+          } catch {
+            // pbl_status is read-only and a partial answer beats none — one
+            // failing lookup must not blank out every other skill.
+            entries.push({ name: s.CoreCompetencyModel.name, levels: null });
+          }
+        }
+        skillsSection = renderSkills(entries);
+      }
+
       // Only pay for the content-unit/sub-unit fetches once the course could
       // possibly have any — a session still at "context" cannot, and must
       // not eat the network cost of calls that only ever return nothing.
@@ -299,7 +329,8 @@ export const registerSessionTools = (
       }
 
       return text(
-        renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) + breakdown,
+        renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) +
+          skillsSection + breakdown,
       );
     },
   );
@@ -342,8 +373,20 @@ export const registerSessionTools = (
             description: z.string().optional(),
             minutes: z.number().int().positive().max(60000).optional()
               .describe('Estimated duration in MINUTES'),
-            skills: z.array(z.string()).min(1).max(10)
-              .describe('Skill names, resolved against the course’s selected skills'),
+            skills: z.array(
+              z.object({
+                name: z.string().describe('Skill name, resolved against the course’s selected skills'),
+                level: z.string().optional().describe(
+                  'The level a learner is expected to reach in this sub-content unit, by ' +
+                    'name — resolved against that skill’s competency’s own levels (never ' +
+                    'CourseSkill, which carries no level). May be omitted only when the ' +
+                    'competency has exactly one level, in which case that one is used ' +
+                    'automatically; otherwise omitting it is an error naming the available ' +
+                    'level names.',
+                ),
+              }),
+            ).min(1).max(10)
+              .describe('Skills assigned to this sub-content unit, each with the level to assign it at'),
           }),
         )
         .optional()

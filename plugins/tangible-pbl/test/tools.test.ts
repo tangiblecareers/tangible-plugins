@@ -1307,7 +1307,6 @@ describe('pbl_approve — detail and artifacts gates', () => {
         CourseSkills: [{
           id: 'cs1', isSelected: true,
           CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
-          Level: { id: 'lvl1', name: 'Foundational' },
         }],
       }],
       // Anchored on the preceding slash: "sub-content-units" ends in
@@ -1317,6 +1316,9 @@ describe('pbl_approve — detail and artifacts gates', () => {
       // what should be the created sub-unit.
       [/\/content-units$/, [{ id: 'cu1', title: 'Module One' }]],
       [/sub-content-units$/, { id: 'su1', title: 'Lesson A' }],
+      // The skill's competency has exactly one level, so the breakdown below
+      // can omit `level` and have it used automatically.
+      [/^business\/competencies\/ccm1$/, { id: 'ccm1', Levels: [{ id: 'lvl1', name: 'Foundational' }] }],
     ]);
     const rtHolder = { current: await makeRuntime(http, root) };
     await seed(rtHolder.current.store, 'outline');
@@ -1326,7 +1328,7 @@ describe('pbl_approve — detail and artifacts gates', () => {
       sessionId: 's1',
       subUnits: [{
         contentUnit: 'Module One', title: 'Lesson A', minutes: 45,
-        skills: ['Visual Hierarchy'],
+        skills: [{ name: 'Visual Hierarchy' }],
       }],
     });
 
@@ -1393,13 +1395,13 @@ describe('pbl_status — breakdown listing', () => {
       updated: '2026-08-06T10:00:00.000Z',
     } as CourseMemory);
 
-  it('does not call content-units/sub-units for a course that has not reached "detail"', async () => {
+  it('does not call content-units/sub-units/competencies for a course that has not reached "detail"', async () => {
     const calls: RequestOpts[] = [];
     const request = vi.fn(async (opts: RequestOpts) => {
       calls.push(opts);
       if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
-      // Any content-units or sub-content-units call is exactly what a
-      // pre-"detail" session must not pay for — fail loudly if it happens.
+      // Any content-units, sub-content-units, course or competency call is
+      // exactly what a pre-"skills" session must not pay for — fail loudly.
       throw new Error(`unexpected request ${opts.method} ${opts.path}`);
     });
     const rtHolder = {
@@ -1411,12 +1413,27 @@ describe('pbl_status — breakdown listing', () => {
     const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
 
     expect(result.content[0].text).not.toContain('Breakdown:');
-    expect(calls.some((c) => /content-units/.test(c.path))).toBe(false);
+    expect(result.content[0].text).not.toContain('Skills:');
+    // The stronger assertion: no non-auth call happened at all, not merely
+    // that content-units wasn't one of them — this is what actually proves
+    // zero level lookups, rather than just an absent section in the text.
+    expect(calls.every((c) => c.path.startsWith('auth/'))).toBe(true);
   });
 
   it('lists content units, sub-units and their skills by name, with no id, once "detail" is reached', async () => {
     const request = vi.fn(async (opts: RequestOpts) => {
       if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path === 'business/courses/c1') {
+        return {
+          id: 'c1', status: 'DRAFT',
+          CourseSkills: [
+            { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' } },
+          ],
+        };
+      }
+      if (opts.path === 'business/competencies/ccm1') {
+        return { id: 'ccm1', Levels: [{ id: 'lvl1', name: 'Foundational' }] };
+      }
       if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
         return [{ coreCompetencyModelId: 'ccm1', levelId: 'lvl1', name: 'Visual Hierarchy' }];
       }
@@ -1435,6 +1452,8 @@ describe('pbl_status — breakdown listing', () => {
     const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
     const out = result.content[0].text;
 
+    expect(out).toContain('Skills:');
+    expect(out).toContain('Visual Hierarchy — Foundational');
     expect(out).toContain('Breakdown:');
     expect(out).toContain('Module One');
     expect(out).toContain('Lesson A');
@@ -1449,6 +1468,9 @@ describe('pbl_status — breakdown listing', () => {
   it('never renders a bare coreCompetencyModelId in the breakdown — falls back to a count', async () => {
     const request = vi.fn(async (opts: RequestOpts) => {
       if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path === 'business/courses/c1') {
+        return { id: 'c1', status: 'DRAFT', CourseSkills: [] };
+      }
       if (/sub-content-units\/su1\/skills$/.test(opts.path)) {
         return [{ coreCompetencyModelId: 'ccm-secret-uuid' }];
       }
@@ -1469,6 +1491,134 @@ describe('pbl_status — breakdown listing', () => {
 
     expect(out).toContain('Lesson A (1 skill)');
     expect(out).not.toContain('ccm-secret-uuid');
+  });
+});
+
+describe('pbl_status — skills listing', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-status-skills-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const seedAt = async (store: CourseMemoryStore, step: CourseMemory['step']) =>
+    store.save({
+      id: 's1', title: 'A course', env: 'staging', courseId: 'c1',
+      businessName: 'Acme', brief: 'b', step, awaitingApproval: true,
+      status: 'active', created: '2026-08-06T10:00:00.000Z',
+      updated: '2026-08-06T10:00:00.000Z',
+    } as CourseMemory);
+
+  it('shows selected skills and their levels, one competency call per distinct selected skill, no id anywhere', async () => {
+    // Realistic UUIDs, not "ccm1"/"lvl1" — a fixture that used short fake ids
+    // could pass a broken "hide only these exact strings" implementation and
+    // still leak a real one.
+    const VH_ID = '7a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+    const CR_ID = '9c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path === 'business/courses/c1') {
+        return {
+          id: 'c1', status: 'DRAFT',
+          CourseSkills: [
+            {
+              id: '3f9c1e2a-4b7d-4e21-9a4a-1c2d3e4f5061', isSelected: true,
+              CoreCompetencyModel: { id: VH_ID, name: 'Visual Hierarchy' },
+            },
+            {
+              id: '8b2c3d4e-5f6a-4b7c-9d0e-1f2a3b4c5d6e', isSelected: true,
+              CoreCompetencyModel: { id: CR_ID, name: 'Critique' },
+            },
+            {
+              id: 'e0f1a2b3-c4d5-4e6f-8a9b-0c1d2e3f4a5b', isSelected: false,
+              CoreCompetencyModel: { id: 'd1e2f3a4-b5c6-4d7e-8f9a-0b1c2d3e4f5a', name: 'Ignored (unselected)' },
+            },
+          ],
+        };
+      }
+      if (opts.path === `business/competencies/${VH_ID}`) {
+        return { id: VH_ID, Levels: [
+          { id: 'l1', name: 'Foundational' }, { id: 'l2', name: 'Proficient' }, { id: 'l3', name: 'Advanced' },
+        ] };
+      }
+      if (opts.path === `business/competencies/${CR_ID}`) {
+        return { id: CR_ID, Levels: [] };
+      }
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'skills');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Skills:');
+    expect(out).toContain('Visual Hierarchy — Foundational, Proficient, Advanced');
+    expect(out).toContain('Critique — (no levels)');
+    expect(out).not.toContain('Ignored (unselected)');
+    // Only the two selected skills are fetched — never the unselected one.
+    const competencyCalls = request.mock.calls.filter((c) =>
+      (c[0] as RequestOpts).path.startsWith('business/competencies/'));
+    expect(competencyCalls).toHaveLength(2);
+    expect(out).not.toMatch(
+      /3f9c1e2a|8b2c3d4e|e0f1a2b3|7a1b2c3d|9c3d4e5f|d1e2f3a4|l1|l2|l3/,
+    );
+  });
+
+  it('makes no getCourse or level calls for a session still at "context"', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'context');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+
+    expect(result.content[0].text).not.toContain('Skills:');
+    expect(request.mock.calls.every((c) => (c[0] as RequestOpts).path.startsWith('auth/'))).toBe(true);
+  });
+
+  it('renders "(levels unavailable)" for one failing lookup, without failing pbl_status or the other skill', async () => {
+    const request = vi.fn(async (opts: RequestOpts) => {
+      if (opts.path.startsWith('auth/')) return { token: 'biz', businessRole: 'ADMIN' };
+      if (opts.path === 'business/courses/c1') {
+        return {
+          id: 'c1', status: 'DRAFT',
+          CourseSkills: [
+            { id: 'cs1', isSelected: true, CoreCompetencyModel: { id: 'ccm-ok', name: 'Visual Hierarchy' } },
+            { id: 'cs2', isSelected: true, CoreCompetencyModel: { id: 'ccm-bad', name: 'Typographic Systems' } },
+          ],
+        };
+      }
+      if (opts.path === 'business/competencies/ccm-ok') {
+        return { id: 'ccm-ok', Levels: [{ id: 'l1', name: 'Foundational' }] };
+      }
+      if (opts.path === 'business/competencies/ccm-bad') {
+        throw new Error('upstream exploded');
+      }
+      throw new Error(`unexpected request ${opts.method} ${opts.path}`);
+    });
+    const rtHolder = {
+      current: await makeRuntime({ request } as unknown as HttpClient, root),
+    };
+    await seedAt(rtHolder.current.store, 'skills');
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    // The call itself must still resolve (not throw) despite one failing lookup.
+    const result = await handlers.get('pbl_status')!({ sessionId: 's1' });
+    const out = result.content[0].text;
+
+    expect(out).toContain('Visual Hierarchy — Foundational');
+    expect(out).toContain('Typographic Systems — (levels unavailable)');
   });
 });
 

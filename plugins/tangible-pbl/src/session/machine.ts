@@ -1,4 +1,5 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
+import type { CompetencyLevel } from '../api/competency.js';
 import type { CourseMemory, Step } from './memory.js';
 import { byName } from './by-name.js';
 import { planSubUnits, type SubUnitSpec } from './detail-plan.js';
@@ -34,6 +35,8 @@ export interface MachineDeps {
     courseId: string, contentUnitId: string, subUnitId: string,
     body: { coreCompetencyModelId: string; levelId: string },
   ): Promise<unknown>;
+  /** No CourseSkill carries a level — this is how the detail gate finds one. */
+  getCompetencyLevels(coreCompetencyModelId: string): Promise<CompetencyLevel[]>;
   listSubUnits(courseId: string, contentUnitId: string): Promise<SubContentUnit[]>;
   generateArtifact(
     courseId: string, contentUnitId: string, subUnitId: string,
@@ -159,7 +162,26 @@ export const advance = async (
         deps.listContentUnits(state.courseId),
         deps.getCourse(state.courseId),
       ]);
-      const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? []);
+      const selected = (course.CourseSkills ?? []).filter((s) => s.isSelected);
+
+      // No CourseSkill carries a level — it is chosen per sub-unit, against
+      // the skill's competency's own levels (see CLAUDE.md). Fetch each
+      // distinct skill's levels exactly once, before any write: sequentially,
+      // so two names that happen to share a competency id cannot race each
+      // other into two fetches for the one map entry.
+      const distinctNames = new Set(input.subUnits.flatMap((s) => s.skills.map((k) => k.name)));
+      const levelsByCompetencyId = new Map<string, CompetencyLevel[]>();
+      for (const name of distinctNames) {
+        const match = byName(selected, (s) => s.CoreCompetencyModel.name, name, 'skill');
+        if (!levelsByCompetencyId.has(match.CoreCompetencyModel.id)) {
+          levelsByCompetencyId.set(
+            match.CoreCompetencyModel.id,
+            await deps.getCompetencyLevels(match.CoreCompetencyModel.id),
+          );
+        }
+      }
+
+      const plan = planSubUnits(input.subUnits, units, course.CourseSkills ?? [], levelsByCompetencyId);
 
       const created: { contentUnitTitle: string; title: string; skills: string[] }[] = [];
       try {

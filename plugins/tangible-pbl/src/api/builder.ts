@@ -16,7 +16,6 @@ export interface CourseSkill {
   id: string;
   isSelected: boolean;
   CoreCompetencyModel: { id: string; name: string };
-  Level?: { id: string; name: string };
 }
 
 export interface CourseProblem {

@@ -15,12 +15,10 @@ const SKILLS = [
   {
     id: 'cs1', isSelected: true,
     CoreCompetencyModel: { id: 'm1', name: 'Triage' },
-    Level: { id: 'lvl1', name: 'Foundational' },
   },
   {
     id: 'cs2', isSelected: true,
     CoreCompetencyModel: { id: 'm2', name: 'Comms' },
-    Level: { id: 'lvl2', name: 'Foundational' },
   },
 ];
 const PROBLEMS = [
@@ -42,6 +40,8 @@ const deps = (over: Partial<Parameters<typeof advance>[0]> = {}) => ({
   createSubUnit: vi.fn().mockImplementation((_c: string, _cu: string, v: { title: string }) =>
     Promise.resolve({ id: `su-${v.title}`, title: v.title })),
   assignSkill: vi.fn().mockResolvedValue({}),
+  getCompetencyLevels: vi.fn().mockImplementation((id: string) =>
+    Promise.resolve([{ id: `lvl-${id}`, name: 'Foundational' }])),
   listSubUnits: vi.fn().mockResolvedValue([]),
   generateArtifact: vi.fn().mockResolvedValue({}),
   publish: vi.fn().mockResolvedValue({ id: 'c1', status: 'PUBLISHED' }),
@@ -84,7 +84,7 @@ describe('the gate guarantee', () => {
     let s = state({ step: 'context' });
     const input = {
       selectProblem: 'p1',
-      subUnits: [{ contentUnit: 'Unit 1', title: 'Lesson', skills: ['Triage'] }],
+      subUnits: [{ contentUnit: 'Unit 1', title: 'Lesson', skills: [{ name: 'Triage' }] }],
     };
     for (const expected of ['skills', 'problems', 'outline', 'detail']) {
       ({ state: s } = await advance(d, s, input));
@@ -232,7 +232,6 @@ describe('advance to detail', () => {
   const skills = [{
     id: 'cs1', isSelected: true,
     CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
-    Level: { id: 'lvl1', name: 'Foundational' },
   }];
 
   const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
@@ -242,6 +241,7 @@ describe('advance to detail', () => {
     createSubUnit: vi.fn().mockImplementation((_c, _cu, v) =>
       Promise.resolve({ id: `su-${v.title}`, title: v.title })),
     assignSkill: vi.fn().mockResolvedValue({}),
+    getCompetencyLevels: vi.fn().mockResolvedValue([{ id: 'lvl1', name: 'Foundational' }]),
     ...over,
   });
 
@@ -250,7 +250,7 @@ describe('advance to detail', () => {
       contentUnit: 'Module One',
       title: 'Lesson A',
       minutes: 45,
-      skills: ['Visual Hierarchy'],
+      skills: [{ name: 'Visual Hierarchy' }],
     }],
   };
 
@@ -284,7 +284,7 @@ describe('advance to detail', () => {
     const d = detailDeps();
     await expect(
       advance(d, state({ step: 'outline' }), {
-        subUnits: [{ contentUnit: 'Nope', title: 'A', skills: ['Visual Hierarchy'] }],
+        subUnits: [{ contentUnit: 'Nope', title: 'A', skills: [{ name: 'Visual Hierarchy' }] }],
       }),
     ).rejects.toThrow(/No content unit matching/);
     // The whole point of validating first: a bad name in the breakdown must not
@@ -298,8 +298,8 @@ describe('advance to detail', () => {
     await expect(
       advance(d, state({ step: 'outline' }), {
         subUnits: [
-          { contentUnit: 'Module One', title: 'Good', skills: ['Visual Hierarchy'] },
-          { contentUnit: 'Module One', title: 'Bad', skills: ['Unknown'] },
+          { contentUnit: 'Module One', title: 'Good', skills: [{ name: 'Visual Hierarchy' }] },
+          { contentUnit: 'Module One', title: 'Bad', skills: [{ name: 'Unknown' }] },
         ],
       }),
     ).rejects.toThrow(/No skill matching "Unknown"/);
@@ -313,25 +313,22 @@ describe('advance to detail — partial failure mid-loop', () => {
     {
       id: 'cs1', isSelected: true,
       CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
-      Level: { id: 'lvl1', name: 'Foundational' },
     },
     {
       id: 'cs2', isSelected: true,
       CoreCompetencyModel: { id: 'ccm2', name: 'Typography' },
-      Level: { id: 'lvl2', name: 'Foundational' },
     },
     {
       id: 'cs3', isSelected: true,
       CoreCompetencyModel: { id: 'ccm3', name: 'Critique' },
-      Level: { id: 'lvl3', name: 'Foundational' },
     },
   ];
 
   const input = {
     subUnits: [
-      { contentUnit: 'Module One', title: 'Lesson A', skills: ['Visual Hierarchy'] },
-      { contentUnit: 'Module One', title: 'Lesson B', skills: ['Typography'] },
-      { contentUnit: 'Module One', title: 'Lesson C', skills: ['Critique'] },
+      { contentUnit: 'Module One', title: 'Lesson A', skills: [{ name: 'Visual Hierarchy' }] },
+      { contentUnit: 'Module One', title: 'Lesson B', skills: [{ name: 'Typography' }] },
+      { contentUnit: 'Module One', title: 'Lesson C', skills: [{ name: 'Critique' }] },
     ],
   };
 
@@ -340,6 +337,8 @@ describe('advance to detail — partial failure mid-loop', () => {
     listContentUnits: vi.fn().mockResolvedValue(units),
     getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: threeSkills }),
     assignSkill: vi.fn().mockResolvedValue({}),
+    getCompetencyLevels: vi.fn().mockImplementation((id: string) =>
+      Promise.resolve([{ id: `lvl-${id}`, name: 'Foundational' }])),
     ...over,
   });
 
@@ -378,6 +377,52 @@ describe('advance to detail — partial failure mid-loop', () => {
     expect(err!.message).toContain('0 of 3');
     expect(err!.message).toContain('(none)');
     expect(err!.message).not.toContain('Lesson A');
+  });
+});
+
+describe('advance to detail — level lookups are fetched once per distinct skill', () => {
+  const units = [{ id: 'cu1', title: 'Module One' }];
+  const twoSkills = [
+    {
+      id: 'cs1', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm1', name: 'Visual Hierarchy' },
+    },
+    {
+      id: 'cs2', isSelected: true,
+      CoreCompetencyModel: { id: 'ccm2', name: 'Typography' },
+    },
+  ];
+
+  const detailDeps = (over: Partial<MachineDeps> = {}): MachineDeps => ({
+    ...deps(),
+    listContentUnits: vi.fn().mockResolvedValue(units),
+    getCourse: vi.fn().mockResolvedValue({ id: 'c1', status: 'DRAFT', CourseSkills: twoSkills }),
+    createSubUnit: vi.fn().mockImplementation((_c, _cu, v) =>
+      Promise.resolve({ id: `su-${v.title}`, title: v.title })),
+    assignSkill: vi.fn().mockResolvedValue({}),
+    ...over,
+  });
+
+  it('fetches getCompetencyLevels once per distinct skill across the whole breakdown, not once per sub-unit', async () => {
+    const getCompetencyLevels = vi.fn().mockImplementation((id: string) =>
+      Promise.resolve([{ id: `lvl-${id}`, name: 'Foundational' }]));
+    const d = detailDeps({ getCompetencyLevels });
+
+    await advance(d, state({ step: 'outline' }), {
+      subUnits: [
+        { contentUnit: 'Module One', title: 'Lesson A', skills: [{ name: 'Visual Hierarchy' }] },
+        { contentUnit: 'Module One', title: 'Lesson B', skills: [{ name: 'Visual Hierarchy' }] },
+        { contentUnit: 'Module One', title: 'Lesson C', skills: [{ name: 'Typography' }] },
+      ],
+    });
+
+    // 3 sub-units referencing only 2 distinct skills: a naive per-sub-unit (or
+    // per-skill-occurrence) implementation would call 3 times here — this
+    // must be exactly 2, not 3 and not 1 (which would mean the second
+    // distinct skill was never fetched at all).
+    expect(getCompetencyLevels).toHaveBeenCalledTimes(2);
+    expect(getCompetencyLevels).toHaveBeenCalledWith('ccm1');
+    expect(getCompetencyLevels).toHaveBeenCalledWith('ccm2');
   });
 });
 
