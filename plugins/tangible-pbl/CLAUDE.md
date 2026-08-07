@@ -156,7 +156,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 247 tests
+npm test          # vitest run, 278 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -208,19 +208,34 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
   `pbl_revise` also advances. Substance holds (human-initiated), wording
   overstates.
 
-## Never verified against a real backend
+## What has and has not run against a real backend
 
-**Nearly none of this has run against a live Tangible instance.** All 247 tests
-use mocked HTTP. A first staging run reached course creation and found that
-`POST business/courses` does not return the course id where the client expects
-it — see item 8 below. The README's "Before you trust it" checklist is the smoke test,
-and it needs staging credentials that did not exist when this was built.
+All 278 tests use mocked HTTP, so this section — not the suite — is the record
+of what has actually been exercised live.
 
-Until someone walks a real brief through to the outline gate, treat the
-brief→context/skills mapping quality as **unknown**. That uncertainty was the
-reason the `detail` layer was next in line; it has since been built, but —
-like everything else in this section — it has not been run against a live
-backend either.
+**Verified on staging:** the pipeline runs from a brief through `context`,
+`skills`, `problems` and `outline`. A real course reached DRAFT with five
+selected skills, a chosen problem scenario and four content units. So the
+brief→context/skills mapping quality is no longer unknown; it produced a
+usable course.
+
+Two client bugs were found that way, both fixed, and both the same shape — an
+assumption about a response the client had never actually seen:
+
+- `POST business/courses` does not return the course id where the client
+  looked. It wrote the literal string `undefined` into a memory file and
+  bricked it. Fixed by `asCourse` (item 8), which now resolves the id from
+  several plausible shapes and, failing that, throws naming the keys actually
+  present.
+- `CourseSkill.Level` does not exist (item 9). Every skill was rejected at the
+  `detail` gate. Fixed by fetching levels from the competency instead.
+
+**Not yet verified:** everything from `detail` onward — sub-content units,
+skills on them, artifacts, the publish precondition, and invitations. That is
+the next thing to run, and given the two bugs above, expect the first attempt
+to surface a third shape mismatch rather than to succeed outright. When it
+does, the error should name the keys it received; add the path it reveals to
+the resolver rather than patching the single call site.
 
 ## Conventions
 
