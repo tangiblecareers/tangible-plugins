@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { createCourse, generateContentUnits, generateProblems, generateSkills, getCourse, listContentUnits, selectContext, selectProblem, selectSkill, addContext, } from '../api/builder.js';
 import { createSubUnit, listSubUnits, listSubUnitSkills, assignSkill, generateArtifact, } from '../api/subunits.js';
 import { publishCourse, sendInvitations } from '../api/courses.js';
+import { getCompetencyLevels } from '../api/competency.js';
 import { advance, assertRevisable, STEP_ORDER, } from '../session/machine.js';
-import { renderGate, renderLedger, renderBreakdown } from '../session/ledger.js';
+import { renderGate, renderLedger, renderBreakdown, renderSkills, } from '../session/ledger.js';
 import { reconcile, renderResume } from '../session/reconcile.js';
 import { resolveBusiness } from '../resolve.js';
 import { text } from './render.js';
@@ -60,6 +61,7 @@ const depsFor = (rt, onProgress) => ({
     listContentUnits: (id) => listContentUnits(rt.http, rt.auth, id),
     createSubUnit: (id, cuId, values) => createSubUnit(rt.http, rt.auth, id, cuId, values),
     assignSkill: (id, cuId, suId, body) => assignSkill(rt.http, rt.auth, id, cuId, suId, body),
+    getCompetencyLevels: (id) => getCompetencyLevels(rt.http, rt.auth, id),
     listSubUnits: (id, cuId) => listSubUnits(rt.http, rt.auth, id, cuId),
     generateArtifact: (id, cuId, suId, body) => generateArtifact(rt.http, rt.auth, id, cuId, suId, body),
     publish: (id) => publishCourse(rt.http, rt.auth, id),
@@ -203,6 +205,28 @@ export const registerSessionTools = (server, rt) => {
                     .join('\n'));
         }
         const state = await current.store.load(current.env, sessionId);
+        // Only pay for the course/competency fetches once skills could exist —
+        // a session still at "context" has none selected yet, and must not eat
+        // the network cost of calls that only ever return nothing.
+        const skillsReached = STEP_ORDER.indexOf(state.step) >= STEP_ORDER.indexOf('skills');
+        let skillsSection = '';
+        if (skillsReached) {
+            const course = await getCourse(current.http, current.auth, state.courseId);
+            const selected = (course.CourseSkills ?? []).filter((s) => s.isSelected);
+            const entries = [];
+            for (const s of selected) {
+                try {
+                    const levels = await getCompetencyLevels(current.http, current.auth, s.CoreCompetencyModel.id);
+                    entries.push({ name: s.CoreCompetencyModel.name, levels: levels.map((l) => l.name) });
+                }
+                catch {
+                    // pbl_status is read-only and a partial answer beats none — one
+                    // failing lookup must not blank out every other skill.
+                    entries.push({ name: s.CoreCompetencyModel.name, levels: null });
+                }
+            }
+            skillsSection = renderSkills(entries);
+        }
         // Only pay for the content-unit/sub-unit fetches once the course could
         // possibly have any — a session still at "context" cannot, and must
         // not eat the network cost of calls that only ever return nothing.
@@ -226,7 +250,8 @@ export const registerSessionTools = (server, rt) => {
             // approved before running pbl_publish.
             breakdown = renderBreakdown(breakdownUnits);
         }
-        return text(renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) + breakdown);
+        return text(renderGate(state, { appUrl: current.appUrl, produced: { kind: 'none' } }) +
+            skillsSection + breakdown);
     });
     server.tool('pbl_resume', 'Reopen a course by name, re-resolve its business, and report anything that ' +
         'changed in the web app since. Never overwrites the backend.', { course: z.string().describe('The course slug, as shown by pbl_status') }, async ({ course: slug }) => {
@@ -253,8 +278,16 @@ export const registerSessionTools = (server, rt) => {
             description: z.string().optional(),
             minutes: z.number().int().positive().max(60000).optional()
                 .describe('Estimated duration in MINUTES'),
-            skills: z.array(z.string()).min(1).max(10)
-                .describe('Skill names, resolved against the course’s selected skills'),
+            skills: z.array(z.object({
+                name: z.string().describe('Skill name, resolved against the course’s selected skills'),
+                level: z.string().optional().describe('The level a learner is expected to reach in this sub-content unit, by ' +
+                    'name — resolved against that skill’s competency’s own levels (never ' +
+                    'CourseSkill, which carries no level). May be omitted only when the ' +
+                    'competency has exactly one level, in which case that one is used ' +
+                    'automatically; otherwise omitting it is an error naming the available ' +
+                    'level names.'),
+            })).min(1).max(10)
+                .describe('Skills assigned to this sub-content unit, each with the level to assign it at'),
         }))
             .optional()
             .describe('The sub-content-unit breakdown. Required when advancing to "detail". ' +

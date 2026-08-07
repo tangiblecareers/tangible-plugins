@@ -34,13 +34,33 @@ export const renderBreakdown = (units) => {
     }
     return lines.length > 0 ? `\n\nBreakdown:\n${lines.join('\n')}` : '';
 };
+/**
+ * Renders the selected skills and their available levels, shown by
+ * pbl_status from the "skills" gate onward — this is the only place a
+ * caller can discover level names before guessing wrong at the "detail"
+ * gate and reading the error. A skill with no levels renders `(no levels)`
+ * rather than being omitted: that is precisely what an operator must see and
+ * fix in the app before "detail" will accept it. Names only, never a level
+ * or competency id.
+ */
+export const renderSkills = (skills) => {
+    if (skills.length === 0)
+        return '';
+    const lines = skills.map((s) => {
+        if (s.levels === null)
+            return `  ${s.name} — (levels unavailable)`;
+        if (s.levels.length === 0)
+            return `  ${s.name} — (no levels)`;
+        return `  ${s.name} — ${s.levels.join(', ')}`;
+    });
+    return `\n\nSkills:\n${lines.join('\n')}`;
+};
 const renderProduced = (produced) => {
     switch (produced.kind) {
         case 'skills':
             return produced.skills.length === 0
                 ? 'No skills were generated.'
-                : ['Skills:', ...produced.skills.map((s) => `  ${s.isSelected ? '●' : '○'} ${s.CoreCompetencyModel.name}` +
-                        (s.Level?.name ? ` (${s.Level.name})` : ''))].join('\n');
+                : ['Skills:', ...produced.skills.map((s) => `  ${s.isSelected ? '●' : '○'} ${s.CoreCompetencyModel.name}`)].join('\n');
         case 'problems':
             return produced.problems.length === 0
                 ? 'No problems were generated.'

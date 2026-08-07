@@ -1,4 +1,5 @@
 import type { Course, CourseProblem, CourseSkill, ContentUnit } from '../api/builder.js';
+import type { CompetencyLevel } from '../api/competency.js';
 import type { CourseMemory, Step } from './memory.js';
 import { type SubUnitSpec } from './detail-plan.js';
 import type { SubContentUnit } from '../api/subunits.js';
@@ -21,6 +22,8 @@ export interface MachineDeps {
         coreCompetencyModelId: string;
         levelId: string;
     }): Promise<unknown>;
+    /** No CourseSkill carries a level — this is how the detail gate finds one. */
+    getCompetencyLevels(coreCompetencyModelId: string): Promise<CompetencyLevel[]>;
     listSubUnits(courseId: string, contentUnitId: string): Promise<SubContentUnit[]>;
     generateArtifact(courseId: string, contentUnitId: string, subUnitId: string, body: {
         instruction?: string;

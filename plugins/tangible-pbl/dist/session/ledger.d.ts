@@ -26,6 +26,26 @@ export interface BreakdownUnit {
  * name list — do NOT "fix" this by falling back to the id.
  */
 export declare const renderBreakdown: (units: BreakdownUnit[]) => string;
+/**
+ * One selected skill's levels, as pbl_status fetches them via
+ * getCompetencyLevels. `levels: null` means that one lookup failed —
+ * pbl_status is read-only and a partial answer beats none, so one failing
+ * competency must not blank the whole section.
+ */
+export interface SkillLevelsEntry {
+    name: string;
+    levels: string[] | null;
+}
+/**
+ * Renders the selected skills and their available levels, shown by
+ * pbl_status from the "skills" gate onward — this is the only place a
+ * caller can discover level names before guessing wrong at the "detail"
+ * gate and reading the error. A skill with no levels renders `(no levels)`
+ * rather than being omitted: that is precisely what an operator must see and
+ * fix in the app before "detail" will accept it. Names only, never a level
+ * or competency id.
+ */
+export declare const renderSkills: (skills: SkillLevelsEntry[]) => string;
 export declare const renderGate: (state: CourseMemory, opts: {
     appUrl: string;
     produced: Produced;
