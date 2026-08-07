@@ -141,15 +141,23 @@ inviting).
 
 `pbl_approve`'s `subUnits` field (step `"outline"` → `"detail"` only) is the
 whole sub-content-unit breakdown for the course, one entry per sub-unit:
-`{ contentUnit, title, description?, minutes?, skills[] }`. `contentUnit` and
-every entry of `skills` are names — resolved against the outline's content
-units and the course's selected skills — never ids. `minutes` is estimated
-duration **in minutes**, mapped onto the backend's `estimatedDuration`. The
-whole breakdown is validated (`planSubUnits` in `src/session/detail-plan.ts`)
-before the first sub-unit is created, so an unknown content-unit name, an
-unknown or level-less skill name, more than ten skills on one sub-unit, or an
-out-of-range `minutes` fails the call with nothing created — never a
-partially-built course with no way to tell which half succeeded.
+`{ contentUnit, title, description?, minutes?, skills[] }`, where each entry
+of `skills` is `{ name, level? }`. `contentUnit`, `skills[].name` and
+`skills[].level` are all names — resolved against the outline's content
+units, the course's selected skills, and that skill's own competency levels
+— never ids; `CourseSkill` itself carries no level (see CLAUDE.md item 9), so
+`level` is resolved per sub-unit instead. `level` is the level a learner is
+expected to reach for that skill in that sub-unit; it can be omitted only
+when the skill's competency has exactly one level, in which case that one is
+used automatically. `minutes` is estimated duration **in minutes**, mapped
+onto the backend's `estimatedDuration`. The whole breakdown is validated
+(`planSubUnits` in `src/session/detail-plan.ts`) before the first sub-unit is
+created — every distinct skill's levels are fetched once, up front — so an
+unknown content-unit name, an unknown skill or level name, an omitted `level`
+where the competency has more than one, a competency with no levels at all,
+more than ten skills on one sub-unit, or an out-of-range `minutes` fails the
+call with nothing created — never a partially-built course with no way to
+tell which half succeeded.
 
 `pbl_approve`'s `instruction` field (step `"detail"` → `"artifacts"` only) is
 an optional steer applied identically to every artifact generated at that

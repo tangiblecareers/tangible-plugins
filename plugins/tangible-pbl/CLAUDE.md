@@ -98,10 +98,33 @@ debugging. Do not re-derive them by guessing.
    generated,** unlike skills, problems and content units. `estimatedDuration`
    is in **minutes**, a positive integer, capped at 60000
    (`estimatedDurationSchema`). Assigning a skill to a sub-unit needs **both**
-   `coreCompetencyModelId` and `levelId` — `CourseSkill.Level` is optional, so
-   a skill the backend returned with no level cannot be assigned; `planSubUnits`
-   in `src/session/detail-plan.ts` rejects it by name before any write. Ten
-   skills is the hard ceiling per sub-unit (`subContentUnitSkillUnderLimit`).
+   `coreCompetencyModelId` and `levelId`, and neither comes from `CourseSkill`
+   — verified against the backend models, not inferred: `CourseSkill`'s only
+   columns are `id`, `courseId`, `coreCompetencyModelId`, `source`,
+   `isRecommended`, `isSelected`, and its only associations are `Course` and
+   `CoreCompetencyModel`. **It never carries a level — `CourseSkill.Level`
+   does not exist and never can.** `Level` belongs to `CoreCompetencyModel`
+   instead (a plain `hasMany` with no `as:`, so the serialised key is the
+   default plural `Levels`), as `{ id, name, weight, coreCompetencyModelId }`;
+   `RoleCcm` is the join of `CoreCompetencyModel` + `Level` +
+   `CourseSubContentUnit` that `POST .../sub-content-units/:id/skills`
+   actually creates. So the level is chosen **per sub-unit, at assignment
+   time** — never inherited from the course skill. `coreCompetencyModelId`
+   comes from `CourseSkill.CoreCompetencyModel.id` (already on hand from
+   `course.CourseSkills`); `levelId` comes from
+   `GET business/competencies/:coreCompetencyModelId`, which returns the
+   competency including `Levels`, ordered by `weight` ascending —
+   `getCompetencyLevels` in `src/api/competency.ts` wraps that call, and
+   `planSubUnits` in `src/session/detail-plan.ts` resolves the caller's level
+   name (by name, case-insensitively) against the fetched list, rejecting by
+   name before any write; a competency with exactly one level lets the caller
+   omit `level`, more than one without a `level` is rejected naming the
+   available level names, and a competency with no levels at all is rejected
+   as a data problem to fix in the app, not a client bug. This shipped as a
+   real bug in 0.3.0 — the client read a `CourseSkill.Level` the backend
+   never sends, so live assignment 400'd on the first skill of the first
+   sub-unit, every time; fixed on `fix/pbl-skill-levels`. Ten skills is the
+   hard ceiling per sub-unit (`subContentUnitSkillUnderLimit`).
    Creating a sub-unit, and assigning or changing its skills, both require the
    course to already be in `DRAFT` (`courseIsDraft`) — the same gate
    `content-units/generate` already put in front of everything past the
