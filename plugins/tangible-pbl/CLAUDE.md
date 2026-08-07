@@ -102,18 +102,26 @@ debugging. Do not re-derive them by guessing.
    — verified against the backend models, not inferred: `CourseSkill`'s only
    columns are `id`, `courseId`, `coreCompetencyModelId`, `source`,
    `isRecommended`, `isSelected`, and its only associations are `Course` and
-   `CoreCompetencyModel`. **It never carries a level — `CourseSkill.Level`
-   does not exist and never can.** `Level` belongs to `CoreCompetencyModel`
-   instead (a plain `hasMany` with no `as:`, so the serialised key is the
-   default plural `Levels`), as `{ id, name, weight, coreCompetencyModelId }`;
-   `RoleCcm` is the join of `CoreCompetencyModel` + `Level` +
-   `CourseSubContentUnit` that `POST .../sub-content-units/:id/skills`
-   actually creates. So the level is chosen **per sub-unit, at assignment
+   `CoreCompetencyModel` (`backend/src/models/course-skill.model.ts`). The
+   course fetch includes `CourseSkill → CoreCompetencyModel` with attributes
+   `id, name, description` and nothing else
+   (`backend/src/repositories/course.repository.ts`). **It never carries a
+   level — `CourseSkill.Level` does not exist and never can, so this is not a
+   missing Sequelize `include` and no amount of editing levels in the web app
+   will make one appear.** `Level` belongs to `CoreCompetencyModel` instead (a
+   plain `hasMany` with no `as:`, so the serialised key is the default plural
+   `Levels`), as `{ id, name, weight, coreCompetencyModelId }`
+   (`backend/src/models/core-competency-model.model.ts`); `RoleCcm` is the
+   join of `CoreCompetencyModel` + `Level` + `CourseSubContentUnit` that
+   `POST .../sub-content-units/:id/skills` actually creates
+   (`backend/src/models/role-ccm.model.ts`). So the level is chosen **per sub-unit, at assignment
    time** — never inherited from the course skill. `coreCompetencyModelId`
    comes from `CourseSkill.CoreCompetencyModel.id` (already on hand from
    `course.CourseSkills`); `levelId` comes from
    `GET business/competencies/:coreCompetencyModelId`, which returns the
-   competency including `Levels`, ordered by `weight` ascending —
+   competency including `Levels`, ordered by `weight` ascending
+   (`findCoreCompetencyModelWithRubrics` in
+   `backend/src/repositories/core-competency-model.repository.ts`) —
    `getCompetencyLevels` in `src/api/competency.ts` wraps that call, and
    `planSubUnits` in `src/session/detail-plan.ts` resolves the caller's level
    name (by name, case-insensitively) against the fetched list, rejecting by
