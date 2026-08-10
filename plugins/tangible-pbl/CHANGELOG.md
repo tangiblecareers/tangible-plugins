@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.3.0...tangible-pbl-v0.3.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **tangible-pbl:** resolve skill levels from the competency, not CourseSkill.Level ([d3094c7](https://github.com/tangiblecareers/tangible-plugins/commit/d3094c7f4beb68d0ea19576523561a8783b311cf))
+
 ## [0.3.0](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.2.1...tangible-pbl-v0.3.0) (2026-08-06)
 
 
