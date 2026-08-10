@@ -165,18 +165,27 @@ debugging. Do not re-derive them by guessing.
     `Course` types it as one. `asCourse` in `src/api/builder.ts` flattens
     this back into a real array for every caller, in the grouped object's
     own key/array order — which follows the backend's `createdAt ASC, id
-    ASC` source order — rather than sorting alphabetically. Two different
-    things break without this, and both did, in sequence: with no
+    ASC` source order — rather than sorting alphabetically. With no
     normalisation at all, `seed.map` in `applyContexts`
     (`src/tools/session.ts`) throws `seed.map is not a function` the moment
     a call includes `contexts`, for both `pbl_start_course` and
-    `pbl_revise`; and if that crash is instead "fixed" by defaulting any
-    non-array `CourseContexts` straight to `[]` rather than flattening it,
-    the crash disappears but `applyContexts` silently selects a
-    pre-existing AI-generated context instead of the one it just created —
-    because item 2's already-selected AI contexts make the "known" set look
-    empty when it isn't. The second failure mode produces no error at all,
-    which is why it is worse than the crash it replaces.
+    `pbl_revise` — that crash is what you hit first, and it is loud. What
+    happens if someone "fixes" the crash by defaulting a non-array
+    `CourseContexts` to `[]` instead of flattening it depends on *where*:
+    applied consistently, in the one centralised `asCourse` (the natural
+    place to make this mistake, and the shape the real fix takes),
+    `addContext`'s own response goes through the exact same function and
+    comes back empty too — so `applyContexts`'s existing "did not return
+    the new context" guard throws, loudly, same as before. Silent
+    corruption needs a narrower, *inconsistent* mistake: one call site
+    (e.g. `createCourse`) defaulted to `[]` while another (e.g.
+    `addContext`) still flattens correctly — only then does `known` (built
+    from the wrongly-emptied seed) look empty while `all` (correctly
+    flattened) is not, so `applyContexts` silently selects a pre-existing
+    AI-generated context (item 2) instead of the one it just created, with
+    no error at all. Normalising once, centrally, in `asCourse` is exactly
+    what makes that inconsistent-mistake shape unreachable — that is the
+    actual reason it lives there rather than at each call site.
 
 ## Working here
 
@@ -186,8 +195,22 @@ Standalone npm package — not part of a workspace. From this directory:
 npm install
 npm run build     # tsc → dist/
 npm test          # vitest run, 286 tests
-npx tsc --noEmit  # typecheck only
+npx tsc --noEmit  # typecheck src/ only — this is what `build` also checks
+npm run typecheck # typecheck src/ AND test/ — run this before trusting a fixture
 ```
+
+**`npx tsc --noEmit` alone does not typecheck `test/`.** `tsconfig.json`'s
+`include` is deliberately `src/**/*.ts` only, because `rootDir`/`outDir`
+there define what `build` emits into `dist/` — widening it to catch test
+fixtures would be widening the build's own compiled surface, not just its
+checks. `vitest run` doesn't cover the gap either: it transpiles test files
+through esbuild, which strips types without checking them. So a `test/`
+fixture can silently drift out of sync with a source type change — e.g. a
+`Course` literal missing a newly-required field — and nothing in `npm test`
+or `npx tsc --noEmit` will say so; `npm run typecheck` (via the separate,
+also-committed `tsconfig.typecheck.json`, which only adds `test/**/*.ts` to
+`include`) is the one command that actually looks at both. Run it whenever a
+type used in tests changes shape, not just `npx tsc --noEmit`.
 
 **Rebuild and commit `dist/` with any source change.** `/plugin install`
 fetches files via `git-subdir` and never runs a build, so a source change
@@ -211,6 +234,14 @@ fail**. Both were caught in review; do not reintroduce the pattern.
 - A boundary test must use the value **at** the boundary. Three
   `assertRevisable` tests used `step: 'detail'`, where the correct and the
   buggy threshold agree, so an off-by-one went undetected.
+- A fixture can violate a type and nothing will say so. `test/reconcile.test.ts`
+  built a `Course` without `CourseContexts` the moment that field became
+  required, and neither `npx tsc --noEmit` (`test/` isn't in its `include`)
+  nor `npm test` (esbuild transpiles test files without typechecking them)
+  caught it. Harmless only because `reconcile()` never happened to read that
+  field yet. `npm run typecheck` (see Working Here) exists specifically to
+  catch this class of drift — run it after changing a type used in fixtures,
+  not just `npx tsc --noEmit`.
 
 When a test exists to catch a specific regression, **verify it by hand-patching
 the code to that regression and confirming the test fails.** Restore the source

@@ -158,6 +158,7 @@ const makeRuntime = async (http: HttpClient, storeRoot: string): Promise<Runtime
   return {
     cfg: CFG,
     env: 'staging',
+    apiUrl: 'https://stage.test/v1',
     appUrl: 'https://stage.app',
     http,
     auth,
@@ -591,7 +592,7 @@ describe('pbl_start_course / pbl_revise — grouped CourseContexts (Object.group
     return { http, calls, contexts };
   };
 
-  it('pbl_start_course succeeds with a non-empty contexts array against a grouped-shape fixture', async () => {
+  it('pbl_start_course succeeds with a non-empty contexts array against a grouped-shape fixture (crash-only check — passes under the asymmetric silent-corruption bug too; see "the one that matters most" below)', async () => {
     const { http, calls } = buildGroupedHttp('c1');
     const rtHolder = { current: await makeRuntime(http, root) };
     const handlers = captureHandlers(registerSessionTools, rtHolder);
@@ -608,7 +609,7 @@ describe('pbl_start_course / pbl_revise — grouped CourseContexts (Object.group
     expect(paths.some((p) => p.startsWith('PATCH business/courses/c1/course-contexts/'))).toBe(true);
   });
 
-  it('pbl_revise succeeds with a non-empty contexts array against a grouped-shape fixture', async () => {
+  it('pbl_revise succeeds with a non-empty contexts array against a grouped-shape fixture (crash-only check — passes under the asymmetric silent-corruption bug too; see "the one that matters most" below)', async () => {
     const { http, calls } = buildGroupedHttp('c1');
     const rtHolder = { current: await makeRuntime(http, root) };
     const now = new Date().toISOString();
@@ -645,13 +646,30 @@ describe('pbl_start_course / pbl_revise — grouped CourseContexts (Object.group
     // AI-generated contexts (some already isSelected) into the course before
     // the client ever calls addContext (see CLAUDE.md item 2). `grouped()`
     // flattens in key order DURATION, LEARNING_OUTCOME — so both
-    // pre-existing AI contexts sort BEFORE the newly-added one in `all`. A
-    // naive fix that defaults a non-array CourseContexts straight to `[]`
-    // (instead of flattening it) would leave `known` empty here, and
-    // `all.find((cc) => !known.has(cc.id))` would then match the FIRST
-    // item — an existing AI context — instead of the one just created. This
-    // test fails on the wrong assertion (wrong id patched) under that naive
-    // fix; it does not merely fail to run.
+    // pre-existing AI contexts sort BEFORE the newly-added one in `all`.
+    //
+    // What this test actually proves, precisely: under a full revert of the
+    // fix (asCourse stops flattening entirely) it fails the same way the two
+    // tests above do — a loud "seed.map is not a function" crash. That is
+    // not what makes this test worth having; the other two already cover it.
+    // What only THIS test catches is the narrower, asymmetric mistake:
+    // one course-returning call site (e.g. createCourse) defaulting a
+    // non-array CourseContexts to `[]` while another (e.g. addContext)
+    // still flattens it correctly. Under that specific mistake, `known`
+    // (built from the wrongly-emptied seed) is empty while `all` (correctly
+    // flattened) is not, so `all.find((cc) => !known.has(cc.id))` matches
+    // the FIRST pre-existing item instead of the new one — the assertions
+    // below (wrong id patched, stale isSelected on ai-dur/ai-lo) catch
+    // exactly that. A *consistent* default applied through the single
+    // centralised asCourse (the natural way to make this mistake, and the
+    // shape the real fix takes) empties `addContext`'s response too, so
+    // applyContexts' own "did not return the new context" guard throws
+    // instead — loud, not silent, and indistinguishable from the crash case
+    // as far as this test is concerned. The two tests above
+    // ('pbl_start_course succeeds...', 'pbl_revise succeeds...') only prove
+    // the crash is gone; they pass under the asymmetric mistake too, which
+    // is exactly why this test exists alongside them rather than instead of
+    // them.
     const preExisting: FakeContext[] = [
       { id: 'ai-dur', category: 'DURATION', value: '4 weeks', isSelected: true },
       { id: 'ai-lo', category: 'LEARNING_OUTCOME', value: 'Existing outcome', isSelected: true },
@@ -956,7 +974,7 @@ describe('pbl_approve — publish gate sets status', () => {
     await handlers.get('pbl_approve')!({ sessionId: 's1' });
 
     const memory = await rtHolder.current.store.load('staging', 's1');
-    const differences = reconcile(memory, { id: 'c1', status: 'PUBLISHED' }, []);
+    const differences = reconcile(memory, { id: 'c1', status: 'PUBLISHED', CourseContexts: [] }, []);
     expect(differences.find((d) => d.what === 'published')).toBeUndefined();
   });
 
@@ -976,7 +994,7 @@ describe('pbl_approve — publish gate sets status', () => {
     // "published" means — feeding the reloaded memory back into reconcile
     // against a PUBLISHED course is what actually proves the false warning
     // from the bug report is gone.
-    const differences = reconcile(reloaded, { id: 'c1', status: 'PUBLISHED' }, []);
+    const differences = reconcile(reloaded, { id: 'c1', status: 'PUBLISHED', CourseContexts: [] }, []);
     expect(differences.find((d) => d.what === 'published')).toBeUndefined();
   });
 });

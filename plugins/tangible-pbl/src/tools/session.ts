@@ -69,6 +69,12 @@ const applyContexts = async (
   initialContexts?: CourseContext[],
 ): Promise<void> => {
   if (contexts.length === 0) return;
+  // The `?? []` on both lines below is now unreachable, not load-bearing:
+  // asCourse (src/api/builder.ts) guarantees CourseContexts is a real array
+  // on every Course it returns, grouped-by-category backend response or
+  // not (CLAUDE.md item 10). Left in as a visible, cheap guarantee against
+  // that contract regressing, not because either side of the `??` is
+  // expected to fire.
   const seed = initialContexts ?? (await getCourse(http, auth, courseId)).CourseContexts ?? [];
   const known = new Set(seed.map((c) => c.id));
   for (const c of contexts) {

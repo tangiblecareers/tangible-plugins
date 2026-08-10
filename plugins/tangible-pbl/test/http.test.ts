@@ -117,8 +117,8 @@ describe('createHttpClient', () => {
       .request({ method: 'GET', path: 'x' })
       .catch((e: unknown) => e as TangibleApiError);
     expect(err).toBeInstanceOf(TangibleApiError);
-    expect(err.message).toContain('not found');
-    expect(err.message).not.toContain('8f14e45f');
+    expect((err as TangibleApiError).message).toContain('not found');
+    expect((err as TangibleApiError).message).not.toContain('8f14e45f');
   });
 });
 
