@@ -1,7 +1,7 @@
 {
   "name": "tangible-pbl",
   "description": "Authors Problem-Based Learning courses in Tangible from a single brief — drives the business REST API directly, stopping at six human approval gates. The Tangible web app is used only as a viewer.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Tangible Engineering",
     "email": "kaushal.mishra@tangible.careers"
