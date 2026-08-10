@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.3.1...tangible-pbl-v0.3.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **tangible-pbl:** fix detail-gate id lookup, outline single-shot, and problem-rename drift ([03870d4](https://github.com/tangiblecareers/tangible-plugins/commit/03870d4af142a87835c24013cf27e23ba9570ff7))
+* **tangible-pbl:** flatten grouped CourseContexts so contexts don't crash ([4dada2b](https://github.com/tangiblecareers/tangible-plugins/commit/4dada2b01a0b57bc7a6b4d39859948d116a8d616))
+* **tangible-pbl:** typecheck test/ and correct the silent-selection claim ([b7ef547](https://github.com/tangiblecareers/tangible-plugins/commit/b7ef5472dc2a57d6cfe79ebb397a385b0b2c3598))
+
 ## [0.3.1](https://github.com/tangiblecareers/tangible-plugins/compare/tangible-pbl-v0.3.0...tangible-pbl-v0.3.1) (2026-08-10)
 
 
