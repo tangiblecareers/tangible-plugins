@@ -3,6 +3,7 @@ import { advance, assertRevisable, nextStep, STEP_ORDER } from '../src/session/m
 import type { MachineDeps } from '../src/session/machine.js';
 import type { CourseMemory } from '../src/session/memory.js';
 import { createHttpClient } from '../src/http.js';
+import { reconcile } from '../src/session/reconcile.js';
 
 const state = (over: Partial<CourseMemory> = {}): CourseMemory => ({
   id: 's1', title: 'Intro', env: 'staging', courseId: 'c1',
@@ -132,6 +133,43 @@ describe('advance produces reviewable output', () => {
     expect(produced).toEqual({ kind: 'outline', units: [{ id: 'u1', title: 'Unit 1' }] });
   });
 
+  // Selecting a problem deliberately overwrites the course's title and
+  // description with the problem's, server-side — the backend's own comment
+  // says so. Without this, reconcile() reports that rename as drift on every
+  // pbl_resume from now on, training the operator to ignore its warnings.
+  it('adopts the problem\'s title into memory when advancing to outline', async () => {
+    const d = deps({
+      getCourse: vi.fn().mockResolvedValue({
+        id: 'c1', status: 'INITIALIZING', CourseProblems: PROBLEMS,
+      }),
+      // The updated course comes back from selectProblem itself — not a
+      // second getCourse — so that's the mock that must carry the new title.
+      selectProblem: vi.fn().mockResolvedValue({
+        id: 'c1', status: 'INITIALIZING', title: 'Breach',
+      }),
+    });
+    const { state: s } = await advance(d, state({ step: 'problems', title: 'Intro' }), {
+      selectProblem: 'Breach',
+    });
+    expect(s.title).toBe('Breach');
+  });
+
+  it('reconciles cleanly after adopting the problem title — no title drift reported', async () => {
+    const course = {
+      id: 'c1', status: 'DRAFT' as const, title: 'Breach', CourseContexts: [],
+    };
+    const d = deps({
+      getCourse: vi.fn().mockResolvedValue({
+        id: 'c1', status: 'INITIALIZING', CourseProblems: PROBLEMS,
+      }),
+      selectProblem: vi.fn().mockResolvedValue(course),
+    });
+    const { state: s } = await advance(d, state({ step: 'problems', title: 'Intro' }), {
+      selectProblem: 'Breach',
+    });
+    expect(reconcile(s, course, [])).toEqual([]);
+  });
+
   it('throws on an ambiguous problem name instead of guessing', async () => {
     const d = deps({
       getCourse: vi.fn().mockResolvedValue({
@@ -222,8 +260,28 @@ describe('assertRevisable', () => {
     );
   });
 
-  it('still allows revising the outline after it exists', () => {
-    expect(() => assertRevisable(state({ step: 'detail' }), 'outline')).not.toThrow();
+  // content-units/generate is what flips INITIALIZING -> DRAFT, and that
+  // same route requires an INITIALIZING course to be called at all — so it
+  // can only ever succeed once. Both sides of the boundary matter here:
+  // at 'problems' the course is still INITIALIZING (outline not yet
+  // generated), so revising 'outline' is exactly the first, legitimate
+  // generation and must be allowed; at 'outline' itself — the value AT the
+  // boundary, not one step past it (see CLAUDE.md's testing lessons) — the
+  // course is already DRAFT and a second call is structurally impossible.
+  it('allows revising the outline before it has been generated (course still INITIALIZING)', () => {
+    expect(() => assertRevisable(state({ step: 'problems' }), 'outline')).not.toThrow();
+  });
+
+  it('refuses to revise the outline once it already exists (course already DRAFT)', () => {
+    expect(() => assertRevisable(state({ step: 'outline' }), 'outline')).toThrow(
+      /content-unit titles are fixed at first generation/,
+    );
+  });
+
+  it('refuses to revise the outline from any step past it too', () => {
+    expect(() => assertRevisable(state({ step: 'detail' }), 'outline')).toThrow(
+      /cannot be regenerated/,
+    );
   });
 });
 

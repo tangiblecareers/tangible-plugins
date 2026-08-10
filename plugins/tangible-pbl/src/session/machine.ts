@@ -11,7 +11,7 @@ export const STEP_ORDER: Step[] = [
 ];
 
 /** Steps the backend freezes once content-units/generate flips the course to DRAFT. */
-const FROZEN_AFTER_OUTLINE: Step[] = ['context', 'skills', 'problems'];
+const FROZEN_AFTER_OUTLINE: Step[] = ['context', 'skills', 'problems', 'outline'];
 
 export const nextStep = (step: Step): Step => {
   const i = STEP_ORDER.indexOf(step);
@@ -79,13 +79,30 @@ export const assertRevisable = (state: CourseMemory, step: Step): void => {
   // and flips the course to DRAFT, so the freeze is in effect from the moment
   // state.step becomes 'outline' — not only once 'detail' is reached.
   const outlineDone = STEP_ORDER.indexOf(state.step) >= STEP_ORDER.indexOf('outline');
-  if (outlineDone && FROZEN_AFTER_OUTLINE.includes(step)) {
+  if (!outlineDone || !FROZEN_AFTER_OUTLINE.includes(step)) return;
+
+  // "outline" gets its own message: it isn't frozen for the same reason
+  // context/skills/problems are (their own routes require INITIALIZING).
+  // content-units/generate is what flips INITIALIZING -> DRAFT in the first
+  // place, and that same route requires an INITIALIZING course to even be
+  // called — so it can only ever succeed once. Content-unit titles are fixed
+  // at first generation; there is no "regenerate the outline" the way there
+  // is for skills or problems.
+  if (step === 'outline') {
     throw new Error(
-      `Cannot revise "${step}": context, skills and problems are frozen once ` +
-        `the outline is generated (the course moved to DRAFT). Start a new ` +
-        `course with an adjusted brief, or revise the outline instead.`,
+      `Cannot revise "outline": generating the outline is what moved the course from ` +
+        `INITIALIZING to DRAFT, and content-units/generate only accepts an INITIALIZING ` +
+        `course — so it can only ever succeed once, and content-unit titles are fixed at ` +
+        `first generation. The outline cannot be regenerated. Start a new course with an ` +
+        `adjusted brief if it needs to change.`,
     );
   }
+
+  throw new Error(
+    `Cannot revise "${step}": context, skills and problems are frozen once ` +
+      `the outline is generated (the course moved to DRAFT). Start a new ` +
+      `course with an adjusted brief.`,
+  );
 };
 
 export const advance = async (
@@ -100,8 +117,8 @@ export const advance = async (
   }
 
   const to = nextStep(state.step);
-  const done = (produced: Produced): AdvanceResult => ({
-    state: { ...state, step: to, awaitingApproval: true },
+  const done = (produced: Produced, overrides: Partial<CourseMemory> = {}): AdvanceResult => ({
+    state: { ...state, step: to, awaitingApproval: true, ...overrides },
     produced,
   });
 
@@ -142,10 +159,19 @@ export const advance = async (
         input.selectProblem,
         'problem',
       );
-      await deps.selectProblem(state.courseId, chosen.id, true);
+      // Selecting a problem deliberately overwrites the course's title and
+      // description with the problem's, server-side. The updated course
+      // returned by this same call already carries that new title — using
+      // it here (rather than a separate getCourse) is what lets the memory
+      // adopt the rename instead of reconcile() reporting it as drift on
+      // every pbl_resume from now on.
+      const selected = await deps.selectProblem(state.courseId, chosen.id, true);
       deps.onProgress?.('Generating the course outline…');
       const units = await deps.generateContentUnits(state.courseId);
-      return done({ kind: 'outline', units });
+      return done(
+        { kind: 'outline', units },
+        selected.title ? { title: selected.title } : {},
+      );
     }
 
     case 'detail': {

@@ -441,7 +441,9 @@ export const registerSessionTools = (
   server.tool(
     'pbl_revise',
     'Redo a step with changes — pass `contexts` to add new context items when step is ' +
-      '"context". Context, skills and problems are frozen once the outline exists.',
+      '"context". Context, skills and problems are frozen once the outline exists, and the ' +
+      'outline itself cannot be regenerated once it exists either — content-units/generate ' +
+      'only ever runs once.',
     {
       sessionId: z.string(),
       step: z.enum(['context', 'skills', 'problems', 'outline']),
