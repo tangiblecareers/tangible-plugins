@@ -59,7 +59,16 @@ debugging. Do not re-derive them by guessing.
    require `INITIALIZING`, so **once the outline exists those three are frozen
    permanently.** `assertRevisable` refuses them with an explanation rather
    than letting the API 403. This makes problem selection (gate 3) the last
-   point where the course's foundations can change.
+   point where the course's foundations can change. It also makes
+   `content-units/generate` itself **single-shot**: the same `INITIALIZING`
+   requirement applies to the call that generates the outline, and that call
+   is exactly what moves the course out of `INITIALIZING` — so a second
+   `pbl_revise` with `step: 'outline'` after the outline already exists is
+   structurally impossible, not merely disallowed. Content-unit titles are
+   fixed at first generation; there is no "regenerate the outline." Once the
+   outline exists, `assertRevisable` freezes `'outline'` itself alongside
+   context/skills/problems, with a message naming this specific reason rather
+   than the shared one.
 2. **New contexts arrive unselected — but a freshly-created course isn't
    empty.** `POST course-contexts` creates a `USER_ADDED` item that is "not
    selected and not AI-recommended by default", and `course-skills/generate`
@@ -186,6 +195,35 @@ debugging. Do not re-derive them by guessing.
     no error at all. Normalising once, centrally, in `asCourse` is exactly
     what makes that inconsistent-mistake shape unreachable — that is the
     actual reason it lives there rather than at each call site.
+11. **`POST sub-content-units` does not return the created object — it
+    returns the whole list for that content unit** (`listAllSubContentUnits`),
+    ordered `sortOrder ASC`, the same envelope-shape surprise as items 8 and
+    10. The new unit is created with `sortOrder: maxSortOrder + 1`, so on any
+    content unit that already has a sub-unit it lands **last**, never first.
+    `subContentUnits[0]` — the intuitive one-liner — is therefore not a
+    partial fix but actively wrong: it silently returns whichever sub-unit
+    was created *first*, with no error, and every following `assignSkill`
+    call then attaches to that wrong lesson instead of the one just created.
+    That is worse than the loud "no id in the response" failure it looks like
+    it fixes. `asSubContentUnit` in `src/api/subunits.ts` instead picks the
+    entry with the **highest `sortOrder`**, via an explicit comparison rather
+    than array position, and then verifies that entry's `title` equals the
+    title the call just sent — "highest sortOrder" alone is a fact about
+    ordering, not identity, so a mismatch (a concurrent creation on the same
+    content unit, or a shape change) throws naming both titles rather than
+    guessing.
+12. **Selecting a problem overwrites the course's title and description with
+    the problem's, by design** — the backend's own comment says so
+    (`"Overwrite course title/description with the selected problem's"`).
+    It is not drift. `machine.ts`'s `advance()` adopts the new title into the
+    session memory the moment it advances past problem selection to
+    `outline`, using the `Course` that `selectProblem` itself already
+    returns — no extra `getCourse` needed. Skipping this makes `reconcile()`
+    report a "title mismatch" on every `pbl_resume` from then on, for a
+    rename that was expected every time, which trains the operator to ignore
+    reconcile's warnings and defeats the point of having them. The slug is
+    unaffected — it is the file identity and is deliberately stable (see
+    `CourseMemory.id` in `src/session/memory.ts`); only `title` changes.
 
 ## Working here
 
@@ -194,7 +232,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 286 tests
+npm test          # vitest run, 292 tests
 npx tsc --noEmit  # typecheck src/ only — this is what `build` also checks
 npm run typecheck # typecheck src/ AND test/ — run this before trusting a fixture
 ```
@@ -270,7 +308,7 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## What has and has not run against a real backend
 
-All 286 tests use mocked HTTP, so this section — not the suite — is the record
+All 292 tests use mocked HTTP, so this section — not the suite — is the record
 of what has actually been exercised live.
 
 **Verified on staging:** the pipeline runs from a brief through `context`,

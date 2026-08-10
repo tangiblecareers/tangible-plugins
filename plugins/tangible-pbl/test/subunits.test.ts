@@ -132,3 +132,43 @@ describe('createSubUnit — resolving the sub-unit id from an undocumented shape
     ).rejects.toThrow(/no id in the response/);
   });
 });
+
+/**
+ * Regression: POST sub-content-units actually responds with `subContentUnits`
+ * — the WHOLE list for the content unit (listAllSubContentUnits), ordered
+ * sortOrder ASC, not the created object. The obvious `subContentUnits[0]`
+ * fix returns whichever sub-unit was created *first*, silently, with no
+ * error — worse than the loud "no id" failure it would appear to fix,
+ * because every following assignSkill call attaches to the wrong lesson.
+ */
+describe('createSubUnit — resolving the created unit out of the full list response', () => {
+  it('picks the entry with the highest sortOrder, not the first or last array index', async () => {
+    // Position and correctness deliberately disagree in both directions: the
+    // created entry ("Intro", sortOrder 9) sits in the middle — neither
+    // index 0 (which a `[0]` implementation would wrongly return: "Other")
+    // nor the last index (which a `.at(-1)` implementation would wrongly
+    // return: "Two"). Only an explicit highest-sortOrder comparison gets
+    // this right.
+    const { http } = spyHttp({
+      subContentUnits: [
+        { id: 'su-other', title: 'Other', sortOrder: 5 },
+        { id: 'su-created', title: 'Intro', sortOrder: 9 },
+        { id: 'su-two', title: 'Two', sortOrder: 1 },
+      ],
+    });
+    await expect(createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }))
+      .resolves.toMatchObject({ id: 'su-created', title: 'Intro' });
+  });
+
+  it('throws naming both titles when the highest-sortOrder entry does not match what was sent', async () => {
+    const { http } = spyHttp({
+      subContentUnits: [
+        { id: 'su-a', title: 'Other', sortOrder: 1 },
+        { id: 'su-b', title: 'Wrong Title', sortOrder: 5 },
+      ],
+    });
+    await expect(
+      createSubUnit(http, await ready(), 'c1', 'cu1', { title: 'Intro' }),
+    ).rejects.toThrow(/"Wrong Title".*"Intro"/s);
+  });
+});
