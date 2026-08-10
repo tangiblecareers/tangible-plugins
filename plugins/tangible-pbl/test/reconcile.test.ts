@@ -10,7 +10,7 @@ const memory = (over: Partial<CourseMemory> = {}): CourseMemory => ({
   updated: '2026-08-05T10:00:00.000Z', ...over,
 });
 const course = (over: Partial<Course> = {}): Course =>
-  ({ id: 'c1', title: 'Intro', status: 'INITIALIZING', ...over });
+  ({ id: 'c1', title: 'Intro', status: 'INITIALIZING', CourseContexts: [], ...over });
 const units = (n: number): ContentUnit[] =>
   Array.from({ length: n }, (_, i) => ({ id: `u${i}`, title: `Unit ${i}` }));
 

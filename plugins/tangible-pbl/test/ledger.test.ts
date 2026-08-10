@@ -95,8 +95,8 @@ describe('renderGate', () => {
       produced: {
         kind: 'problems',
         problems: [
-          { id: 'p1', title: 'Escalation scenario' },
-          { id: 'p2', title: 'Time pressure case' },
+          { id: 'p1', title: 'Escalation scenario', isSelected: false },
+          { id: 'p2', title: 'Time pressure case', isSelected: false },
         ],
       },
     });
@@ -113,8 +113,8 @@ describe('renderGate', () => {
       produced: {
         kind: 'problems',
         problems: [
-          { id: 'p1', title: 'Documented case' },
-          { id: 'p2', title: undefined },
+          { id: 'p1', title: 'Documented case', isSelected: false },
+          { id: 'p2', title: undefined, isSelected: false },
         ],
       },
     });
