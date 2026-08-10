@@ -152,6 +152,10 @@ describe('advance produces reviewable output', () => {
       selectProblem: 'Breach',
     });
     expect(s.title).toBe('Breach');
+    // The slug is the memory file's identity and must survive the rename —
+    // CLAUDE.md states this, so pin it here rather than leaving the claim
+    // resting on nothing.
+    expect(s.id).toBe(state().id);
   });
 
   it('reconciles cleanly after adopting the problem title — no title drift reported', async () => {

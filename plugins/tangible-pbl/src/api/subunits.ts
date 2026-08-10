@@ -71,6 +71,13 @@ const highestSortOrder = (
       bestOrder = order;
     }
   }
+  // Degenerate case: if no entry carries a numeric sortOrder they all tie at
+  // -Infinity and the first is kept, which is a positional pick — exactly what
+  // this function exists to avoid. The caller's title check is the only thing
+  // catching it, and it cannot catch two same-titled sub-units under one
+  // content unit. The backend always assigns sortOrder (maxSortOrder + 1), so
+  // this is unreachable today; if it ever fires, fix it here rather than
+  // trusting the title check to cover it.
   return best;
 };
 
