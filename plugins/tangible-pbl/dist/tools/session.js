@@ -169,10 +169,13 @@ export const registerSessionTools = (server, rt) => {
         if (!ctx)
             throw new Error('No business selected. Call pbl_use_business first.');
         const course = await createCourse(current.http, current.auth, brief);
-        // A freshly-created course has no contexts yet, so pass [] explicitly
-        // rather than undefined — that skips applyContexts' getCourse fallback,
-        // which exists for pbl_revise where the course may already have some.
-        await applyContexts(current.http, current.auth, course.id, contexts ?? [], course.CourseContexts ?? []);
+        // The backend seeds every freshly-created course with AI-generated
+        // contexts (CLAUDE.md item 2) — course.CourseContexts (already
+        // flattened by asCourse) is that real starting set. Passing it
+        // explicitly, rather than undefined, skips applyContexts' getCourse
+        // fallback without losing any of those pre-existing contexts from the
+        // "known" diff.
+        await applyContexts(current.http, current.auth, course.id, contexts ?? [], course.CourseContexts);
         const now = new Date().toISOString();
         const id = await current.store.allocateSlug(current.env, course.title, brief);
         const state = {

@@ -60,12 +60,19 @@ debugging. Do not re-derive them by guessing.
    permanently.** `assertRevisable` refuses them with an explanation rather
    than letting the API 403. This makes problem selection (gate 3) the last
    point where the course's foundations can change.
-2. **New contexts arrive unselected.** `POST course-contexts` creates a
-   `USER_ADDED` item that is "not selected and not AI-recommended by default".
-   `course-skills/generate` returns **422** without *selected* contexts — so
-   every `addContext` must be followed by `selectContext`. This bug shipped
-   twice before being caught; `applyContexts` is the shared helper that now
-   prevents a third.
+2. **New contexts arrive unselected — but a freshly-created course isn't
+   empty.** `POST course-contexts` creates a `USER_ADDED` item that is "not
+   selected and not AI-recommended by default", and `course-skills/generate`
+   returns **422** without *selected* contexts — so every `addContext` must
+   still be followed by `selectContext`. That's the whole story for a
+   *user-added* context. It is not the whole story for the course as a
+   whole: `POST /business/courses` generates contexts with AI at creation
+   time and bulk-inserts them with `source: AI_GENERATED` and `isSelected:
+   isRecommended` — so a course a caller has never touched can already have
+   several contexts, some already selected. This bug shipped twice before
+   being caught; `applyContexts` is the shared helper that now prevents a
+   third, and it depends on seeing that real starting set (item 10) to diff
+   against correctly.
 3. **`DURATION` is server-enforced single-select** (selecting one deselects the
    others in a transaction). `LEARNING_OUTCOME` and `LEARNER_PROFILE` have no
    documented exclusivity and **accumulate**.
@@ -148,6 +155,28 @@ debugging. Do not re-derive them by guessing.
    — items 1–8 above came from `api-docs`; this one didn't, so re-verify
    against the routes and validations themselves, not `api-docs`, if the
    backend changes.
+10. **`CourseContexts` comes back grouped by category, never as an array.**
+    Every course-returning handler — `createCourse` and `getCourse` in
+    `business-course.controller.ts`, and all four handlers (add, select,
+    update, delete) in `business-course-context.controller.ts` — runs
+    `Object.groupBy(contexts, c => c.category)` before responding, so the
+    wire shape is `{ DURATION: [...], LEARNING_OUTCOME: [...],
+    LEARNER_PROFILE: [...] }`, never a bare `CourseContext[]`, even though
+    `Course` types it as one. `asCourse` in `src/api/builder.ts` flattens
+    this back into a real array for every caller, in the grouped object's
+    own key/array order — which follows the backend's `createdAt ASC, id
+    ASC` source order — rather than sorting alphabetically. Two different
+    things break without this, and both did, in sequence: with no
+    normalisation at all, `seed.map` in `applyContexts`
+    (`src/tools/session.ts`) throws `seed.map is not a function` the moment
+    a call includes `contexts`, for both `pbl_start_course` and
+    `pbl_revise`; and if that crash is instead "fixed" by defaulting any
+    non-array `CourseContexts` straight to `[]` rather than flattening it,
+    the crash disappears but `applyContexts` silently selects a
+    pre-existing AI-generated context instead of the one it just created —
+    because item 2's already-selected AI contexts make the "known" set look
+    empty when it isn't. The second failure mode produces no error at all,
+    which is why it is worse than the crash it replaces.
 
 ## Working here
 
@@ -156,7 +185,7 @@ Standalone npm package — not part of a workspace. From this directory:
 ```bash
 npm install
 npm run build     # tsc → dist/
-npm test          # vitest run, 278 tests
+npm test          # vitest run, 286 tests
 npx tsc --noEmit  # typecheck only
 ```
 
@@ -210,7 +239,7 @@ Ruled ship-as-is by the whole-branch review, worth tickets:
 
 ## What has and has not run against a real backend
 
-All 278 tests use mocked HTTP, so this section — not the suite — is the record
+All 286 tests use mocked HTTP, so this section — not the suite — is the record
 of what has actually been exercised live.
 
 **Verified on staging:** the pipeline runs from a brief through `context`,

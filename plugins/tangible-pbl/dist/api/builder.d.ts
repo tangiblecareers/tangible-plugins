@@ -26,7 +26,7 @@ export interface Course {
     id: string;
     title?: string;
     status: CourseStatus;
-    CourseContexts?: CourseContext[];
+    CourseContexts: CourseContext[];
     CourseSkills?: CourseSkill[];
     CourseProblems?: CourseProblem[];
 }

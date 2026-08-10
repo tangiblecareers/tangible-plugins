@@ -223,3 +223,82 @@ describe('asCourse — resolving the course id from an undocumented shape', () =
     );
   });
 });
+
+/**
+ * Regression: every course-returning backend handler runs
+ * `Object.groupBy(contexts, c => c.category)` before responding, so
+ * `CourseContexts` arrives as a category-keyed object, never a bare array,
+ * even though `Course.CourseContexts` is typed as `CourseContext[]`. Left
+ * unhandled, `seed.map` in `applyContexts` (src/tools/session.ts) throws
+ * "seed.map is not a function" for any call that includes `contexts`.
+ */
+describe('asCourse — flattening the grouped CourseContexts shape', () => {
+  it('flattens a grouped object into a flat array, keeping every category’s items', () => {
+    const c = asCourse(
+      {
+        id: 'c1',
+        status: 'INITIALIZING',
+        CourseContexts: {
+          DURATION: [{ id: 'd1', category: 'DURATION', value: '4 weeks', isSelected: true }],
+          LEARNING_OUTCOME: [
+            { id: 'lo1', category: 'LEARNING_OUTCOME', value: 'Outcome A', isSelected: false },
+            { id: 'lo2', category: 'LEARNING_OUTCOME', value: 'Outcome B', isSelected: false },
+          ],
+          LEARNER_PROFILE: [
+            { id: 'lp1', category: 'LEARNER_PROFILE', value: 'New hires', isSelected: true },
+          ],
+        },
+      },
+      'x',
+    );
+
+    expect(Array.isArray(c.CourseContexts)).toBe(true);
+    expect(c.CourseContexts).toHaveLength(4);
+    expect(c.CourseContexts.map((cc) => cc.id).sort()).toEqual(['d1', 'lo1', 'lo2', 'lp1']);
+  });
+
+  it('flattens in the grouped object’s own key/array order (first-appearance, i.e. createdAt order) — not alphabetical', () => {
+    // Insertion order deliberately NOT alphabetical, so an implementation
+    // that re-sorted by category name would be caught: alphabetical would
+    // produce [d1, lo1, lp1], but the actual (and correct) order below is
+    // the order the keys were inserted in, i.e. [lo1, d1, lp1].
+    const c = asCourse(
+      {
+        id: 'c1',
+        status: 'INITIALIZING',
+        CourseContexts: {
+          LEARNING_OUTCOME: [
+            { id: 'lo1', category: 'LEARNING_OUTCOME', value: 'Outcome A', isSelected: false },
+          ],
+          DURATION: [{ id: 'd1', category: 'DURATION', value: '4 weeks', isSelected: true }],
+          LEARNER_PROFILE: [
+            { id: 'lp1', category: 'LEARNER_PROFILE', value: 'New hires', isSelected: true },
+          ],
+        },
+      },
+      'x',
+    );
+
+    expect(c.CourseContexts.map((cc) => cc.id)).toEqual(['lo1', 'd1', 'lp1']);
+  });
+
+  it('passes an already-array CourseContexts through unchanged', () => {
+    const arr = [{ id: 'x1', category: 'DURATION', value: '2 weeks', isSelected: true }];
+    const c = asCourse({ id: 'c1', status: 'INITIALIZING', CourseContexts: arr }, 'x');
+    expect(c.CourseContexts).toBe(arr);
+  });
+
+  it('gives [] when CourseContexts is absent from the payload', () => {
+    const c = asCourse({ id: 'c1', status: 'INITIALIZING' }, 'x');
+    expect(c.CourseContexts).toEqual([]);
+  });
+
+  it('treats null or an unrecognisable CourseContexts shape as [] rather than throwing', () => {
+    expect(
+      asCourse({ id: 'c1', status: 'INITIALIZING', CourseContexts: null }, 'x').CourseContexts,
+    ).toEqual([]);
+    expect(
+      asCourse({ id: 'c1', status: 'INITIALIZING', CourseContexts: 'weird' }, 'x').CourseContexts,
+    ).toEqual([]);
+  });
+});

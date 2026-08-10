@@ -26,6 +26,54 @@ const COURSE_AT = [
 /** Where the id plausibly sits inside a course object. */
 const ID_AT = ['id', 'courseId', 'uuid', '_id'];
 /**
+ * Flattens the backend's grouped-by-category `CourseContexts` shape into the
+ * real array `Course.CourseContexts` promises.
+ *
+ * `Course.CourseContexts` is typed as `CourseContext[]`, but every handler
+ * that returns a course runs `Object.groupBy(contexts, c => c.category)`
+ * before responding — `createCourse` and `getCourse` in
+ * `business-course.controller.ts`, and all four handlers (add, select,
+ * update, delete) in `business-course-context.controller.ts`. Six call
+ * sites, and none of them ever send a bare array. What actually comes over
+ * the wire looks like:
+ *   { DURATION: [...], LEARNING_OUTCOME: [...], LEARNER_PROFILE: [...] }
+ * Without this, `seed.map` in `applyContexts` (src/tools/session.ts) throws
+ * "seed.map is not a function" the instant a caller passes `contexts` — the
+ * grouped object isn't nullish, so a plain `?? []` never catches it.
+ *
+ * Defaulting a non-array straight to `[]` would trade that crash for
+ * something worse: a freshly-created course already has AI-generated
+ * contexts, some already `isSelected` (see item 2 in CLAUDE.md). An empty
+ * seed makes `applyContexts`' `all.find((cc) => !known.has(cc.id))` match one
+ * of those pre-existing contexts instead of the one just created, and the
+ * caller silently selects/deselects the wrong context. So: flatten when
+ * there's something to flatten, and only fall back to `[]` when there
+ * genuinely is nothing (absent/null/wrong-shaped) — contexts are incidental
+ * to most calls, and a course fetch should not fail over them.
+ *
+ * Order is deliberate, not incidental: `Object.groupBy` inserts each
+ * category key the first time it's seen scanning the source array, and the
+ * backend's source array is already ordered `createdAt ASC, id ASC`. Plain
+ * string keys keep their insertion order through JSON (stringify writes them
+ * in that order, parse rebuilds them in that order), so `Object.keys` here
+ * reproduces that exact same first-appearance/createdAt order — do not sort
+ * it. Alphabetical order (DURATION, LEARNING_OUTCOME, LEARNER_PROFILE) would
+ * not match creation order and would disagree with how the backend and the
+ * web app present the same contexts. Each category's own array is already in
+ * the backend's order, so concatenating group-by-group in that key order is
+ * the whole algorithm.
+ */
+const asContexts = (raw) => {
+    if (Array.isArray(raw))
+        return raw;
+    if (raw !== null && typeof raw === 'object') {
+        return Object.values(raw)
+            .filter((group) => Array.isArray(group))
+            .flat();
+    }
+    return [];
+};
+/**
  * Resolves the course and its id from a response whose shape is not documented.
  *
  * A live staging run created a course whose payload was truthy but carried no
@@ -47,7 +95,11 @@ export const asCourse = (payload, where) => {
             for (const key of ID_AT) {
                 const id = c[key];
                 if (typeof id === 'string' && id.length > 0) {
-                    return { ...c, id };
+                    return {
+                        ...c,
+                        id,
+                        CourseContexts: asContexts(c.CourseContexts),
+                    };
                 }
             }
         }

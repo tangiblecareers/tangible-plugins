@@ -522,6 +522,166 @@ describe('pbl_start_course — context selection', () => {
   });
 });
 
+describe('pbl_start_course / pbl_revise — grouped CourseContexts (Object.groupBy backend shape)', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'pbl-mcp-grouped-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /**
+   * Mirrors the real backend, not buildFakeHttp above: every course-returning
+   * handler runs `Object.groupBy(contexts, c => c.category)` before
+   * responding, so `CourseContexts` here is always a category-keyed object,
+   * never a bare array — the exact shape that used to crash `seed.map` in
+   * applyContexts before asCourse started flattening it.
+   */
+  const buildGroupedHttp = (courseId: string, seeded: FakeContext[] = []) => {
+    const calls: RequestOpts[] = [];
+    const contexts: FakeContext[] = [...seeded];
+    let nextId = 1;
+    // Groups in first-appearance order, same as Object.groupBy would from
+    // `contexts` ordered createdAt ASC — mirroring the real wire shape,
+    // not engineering the test to match the implementation.
+    const grouped = (): Record<string, FakeContext[]> => {
+      const byCategory: Record<string, FakeContext[]> = {};
+      for (const c of contexts) {
+        (byCategory[c.category] ??= []).push(c);
+      }
+      return byCategory;
+    };
+
+    const http: HttpClient = {
+      async request<T>(opts: RequestOpts): Promise<T> {
+        calls.push(opts);
+        if (opts.path === 'auth/login') return { token: 'user' } as T;
+        if (opts.path === 'auth/business/login') {
+          return { token: 'biz', businessRole: 'ADMIN' } as T;
+        }
+        if (opts.method === 'POST' && opts.path === 'business/courses') {
+          return { id: courseId, status: 'INITIALIZING', CourseContexts: grouped() } as T;
+        }
+        if (opts.method === 'GET' && opts.path === `business/courses/${courseId}`) {
+          return { id: courseId, status: 'INITIALIZING', CourseContexts: grouped() } as T;
+        }
+        if (opts.method === 'POST' && opts.path === `business/courses/${courseId}/course-contexts`) {
+          const body = opts.body as { category: FakeContext['category']; value: string };
+          contexts.push({
+            id: `ctx${nextId++}`, category: body.category, value: body.value, isSelected: false,
+          });
+          return { id: courseId, status: 'INITIALIZING', CourseContexts: grouped() } as T;
+        }
+        const patchMatch = /^business\/courses\/[^/]+\/course-contexts\/(.+)$/.exec(opts.path);
+        if (opts.method === 'PATCH' && patchMatch) {
+          const id = patchMatch[1]!;
+          const body = opts.body as { isSelected: boolean };
+          const target = contexts.find((c) => c.id === id);
+          if (target) target.isSelected = body.isSelected;
+          return { id: courseId, status: 'INITIALIZING', CourseContexts: grouped() } as T;
+        }
+        if (opts.method === 'POST' && opts.path === `business/courses/${courseId}/course-skills/generate`) {
+          return { id: courseId, status: 'INITIALIZING', CourseSkills: [] } as T;
+        }
+        throw new Error(`fake http: unexpected request ${opts.method} ${opts.path}`);
+      },
+    };
+    return { http, calls, contexts };
+  };
+
+  it('pbl_start_course succeeds with a non-empty contexts array against a grouped-shape fixture', async () => {
+    const { http, calls } = buildGroupedHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await expect(
+      handlers.get('pbl_start_course')!({
+        brief: 'Teach incident response',
+        contexts: [{ category: 'LEARNING_OUTCOME', value: 'Handle a live incident' }],
+      }),
+    ).resolves.toBeDefined();
+
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    expect(paths).toContain('POST business/courses/c1/course-contexts');
+    expect(paths.some((p) => p.startsWith('PATCH business/courses/c1/course-contexts/'))).toBe(true);
+  });
+
+  it('pbl_revise succeeds with a non-empty contexts array against a grouped-shape fixture', async () => {
+    const { http, calls } = buildGroupedHttp('c1');
+    const rtHolder = { current: await makeRuntime(http, root) };
+    const now = new Date().toISOString();
+    await rtHolder.current.store.save({
+      id: 's1',
+      title: 'a brief',
+      env: 'staging',
+      courseId: 'c1',
+      businessName: 'Acme',
+      brief: 'a brief',
+      step: 'skills',
+      awaitingApproval: true,
+      status: 'active',
+      created: now,
+      updated: now,
+    });
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await expect(
+      handlers.get('pbl_revise')!({
+        sessionId: 's1',
+        step: 'context',
+        contexts: [{ category: 'LEARNING_OUTCOME', value: 'Handle a live incident' }],
+      }),
+    ).resolves.toBeDefined();
+
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    expect(paths).toContain('POST business/courses/c1/course-contexts');
+    expect(paths.some((p) => p.startsWith('PATCH business/courses/c1/course-contexts/'))).toBe(true);
+  });
+
+  it('the one that matters most: does not silently select a pre-existing AI-generated context instead of the one just created', async () => {
+    // Reproduces the real shape: the backend already bulk-inserted
+    // AI-generated contexts (some already isSelected) into the course before
+    // the client ever calls addContext (see CLAUDE.md item 2). `grouped()`
+    // flattens in key order DURATION, LEARNING_OUTCOME — so both
+    // pre-existing AI contexts sort BEFORE the newly-added one in `all`. A
+    // naive fix that defaults a non-array CourseContexts straight to `[]`
+    // (instead of flattening it) would leave `known` empty here, and
+    // `all.find((cc) => !known.has(cc.id))` would then match the FIRST
+    // item — an existing AI context — instead of the one just created. This
+    // test fails on the wrong assertion (wrong id patched) under that naive
+    // fix; it does not merely fail to run.
+    const preExisting: FakeContext[] = [
+      { id: 'ai-dur', category: 'DURATION', value: '4 weeks', isSelected: true },
+      { id: 'ai-lo', category: 'LEARNING_OUTCOME', value: 'Existing outcome', isSelected: true },
+    ];
+    const { http, calls, contexts } = buildGroupedHttp('c1', preExisting);
+    const rtHolder = { current: await makeRuntime(http, root) };
+    const handlers = captureHandlers(registerSessionTools, rtHolder);
+
+    await handlers.get('pbl_start_course')!({
+      brief: 'Teach incident response',
+      contexts: [{ category: 'LEARNING_OUTCOME', value: 'Handle a live incident' }],
+    });
+
+    const created = contexts.find((c) => c.value === 'Handle a live incident')!;
+    expect(created.id).not.toBe('ai-dur');
+    expect(created.id).not.toBe('ai-lo');
+
+    const patchCalls = calls.filter(
+      (c) => c.method === 'PATCH' && /course-contexts\//.test(c.path),
+    );
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0]!.path).toBe(`business/courses/c1/course-contexts/${created.id}`);
+
+    // Pre-existing AI contexts must be untouched by this flow.
+    expect(contexts.find((c) => c.id === 'ai-dur')!.isSelected).toBe(true);
+    expect(contexts.find((c) => c.id === 'ai-lo')!.isSelected).toBe(true);
+    expect(created.isSelected).toBe(true);
+  });
+});
+
 describe('pbl_approve — progress notifications', () => {
   let root: string;
 
